@@ -26,6 +26,7 @@ export default function App() {
     fetchCatalog,
     startDownload,
     cancelDownload,
+    installBrowser,
     downloadProgress,
     downloadedModelPath,
     modelCatalog,
@@ -115,6 +116,7 @@ export default function App() {
             updateConfig({ model_path: path, ...(backend ? { backend: backend as AppConfig["backend"] } : {}) });
             loadModel(path, backend);
           }}
+          onInstallBrowser={installBrowser}
         />
       )}
 

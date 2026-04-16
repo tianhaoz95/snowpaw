@@ -132,6 +132,40 @@ async def _load_model(backend, path: str) -> None:
         heartbeat_task.cancel()
 
 
+async def _install_browsers() -> None:
+    """Run playwright install chromium, emitting progress."""
+    emit({"type": "model_progress", "stage": "loading", "pct": 0, "text": "Installing Chromium..."})
+    try:
+        # Use the playwright CLI programmatically
+        from playwright.cli.main import main as pw_main
+        # playwright install chromium
+        # Note: pw_main expects a list of args and might call sys.exit,
+        # so we run it in a thread or subprocess to be safe.
+        import subprocess
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "playwright", "install", "chromium",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        assert proc.stdout is not None
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            text = line.decode().strip()
+            if text:
+                emit({"type": "model_progress", "stage": "loading", "pct": 50, "text": text})
+        
+        exit_code = await proc.wait()
+        if exit_code == 0:
+            emit({"type": "model_progress", "stage": "ready", "pct": 100, "text": "Chromium installed."})
+            emit({"type": "system", "text": "Playwright browser (Chromium) installed successfully."})
+        else:
+            emit({"type": "error", "message": f"Browser installation failed (exit {exit_code})."})
+    except Exception as exc:
+        emit({"type": "error", "message": f"Failed to install browser: {exc}"})
+
+
 async def main() -> None:
     from backends import BackendKind, select_backend
     from backends.base import GenerateParams
@@ -143,7 +177,7 @@ async def main() -> None:
         AgentTool, BashTool, DeleteFileTool, EditTool, GlobTool,
         GrepTool, ListDirTool, MoveTool, MultiEditTool, ReadTool,
         ReplTool, SleepTool, WebFetchTool, WebSearchTool, WriteTool,
-        TodoWriteTool,
+        TodoWriteTool, PlaywrightTool,
         TaskCreateTool, TaskGetTool, TaskListTool,
         TaskUpdateTool, TaskStopTool, TaskOutputTool,
         reset_task_session,
@@ -188,6 +222,7 @@ async def main() -> None:
     registry.register(SleepTool())
     registry.register(WebFetchTool())
     registry.register(WebSearchTool())
+    registry.register(PlaywrightTool())
 
     # AgentTool needs references to the backend, registry, and emit_fn
     agent_tool = AgentTool(backend=backend, registry=registry, emit_fn=emit)
@@ -349,6 +384,9 @@ async def main() -> None:
             cancelled = cancel_download()
             if not cancelled:
                 emit({"type": "system", "text": "No active download to cancel."})
+
+        elif msg_type == "install_browsers":
+            asyncio.create_task(_install_browsers())
 
         else:
             log.debug("Unknown message type: %s", msg_type)

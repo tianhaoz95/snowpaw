@@ -12,6 +12,7 @@ from .repl_tool import ReplTool
 from .sleep_tool import SleepTool
 from .web_fetch_tool import WebFetchTool
 from .web_search_tool import WebSearchTool
+from .playwright_tool import PlaywrightTool
 from .agent_tool import AgentTool
 from .task_tools import (
     TodoWriteTool,
@@ -29,7 +30,7 @@ __all__ = [
     "GlobTool", "GrepTool", "BashTool",
     "ListDirTool", "MoveTool", "DeleteFileTool",
     "ReplTool", "SleepTool",
-    "WebFetchTool", "WebSearchTool",
+    "WebFetchTool", "WebSearchTool", "PlaywrightTool",
     "AgentTool",
     # Task & Project Management
     "TodoWriteTool",

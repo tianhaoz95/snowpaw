@@ -20,6 +20,7 @@ interface Props {
   onStartDownload: (modelId: string, destDir?: string, hfToken?: string) => void;
   onCancelDownload: () => void;
   onLoadModel: (modelPath: string, backend?: string) => void;
+  onInstallBrowser: () => void;
 }
 
 export default function Settings({
@@ -207,29 +208,51 @@ export default function Settings({
             step={0.01}
             value={draft.temperature}
             onChange={(e) => set("temperature", Number(e.target.value))}
-            style={{ width: "100%", accentColor: "#ff2d98" }}
-          />
-        </Field>
+            onCancelDownload,
+            onLoadModel,
+            onInstallBrowser,
+            }: Props) {
+            ...
+                  {/* Network Access */}
+                  <Field label="Network Access">
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={draft.network_enabled}
+                        onChange={(e) => set("network_enabled", e.target.checked)}
+                        style={{ accentColor: "#ff2d98" }}
+                      />
+                      <span style={{ color: "#ffffff", fontSize: 13 }}>
+                        Allow network access (WebFetch, WebSearch, Playwright)
+                      </span>
+                    </label>
+                    <span style={{ color: "#ff2d98", fontSize: 11 }}>
+                      Off by default. Network calls still require permission approval in Ask mode.
+                    </span>
+                  </Field>
 
-        {/* Network Access */}
-        <Field label="Network Access">
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={draft.network_enabled}
-              onChange={(e) => set("network_enabled", e.target.checked)}
-              style={{ accentColor: "#ff2d98" }}
-            />
-            <span style={{ color: "#ffffff", fontSize: 13 }}>
-              Allow network access (WebFetch, WebSearch)
-            </span>
-          </label>
-          <span style={{ color: "#ff2d98", fontSize: 11 }}>
-            Off by default. Network calls still require permission approval in Ask mode.
-          </span>
-        </Field>
+                  {/* Browser Engine */}
+                  <Field label="Browser Engine (Playwright)">
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <button
+                        onClick={onInstallBrowser}
+                        style={{
+                          ...btnStyle,
+                          color: "#00ffff",
+                          borderColor: "#00ffff44",
+                          boxShadow: "0 0 5px #00ffff22",
+                        }}
+                      >
+                        Install Browser Engine (Chromium)
+                      </button>
+                    </div>
+                    <span style={{ color: "#00ffff", fontSize: 11, opacity: 0.8 }}>
+                      Required for browser interaction tools. Downloads ~100MB of binaries.
+                    </span>
+                  </Field>
 
-        {/* System Prompt Append */}
+                  {/* System Prompt Append */}
+
         <Field label="Additional System Prompt">
           <textarea
             value={draft.system_prompt_append}

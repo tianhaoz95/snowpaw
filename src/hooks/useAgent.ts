@@ -413,6 +413,13 @@ export function useAgent() {
     await invoke("cancel_model_download").catch(() => {});
   }, []);
 
+  const installBrowser = useCallback(async () => {
+    write("\x1b[33mStarting browser installation (Chromium)…\x1b[0m\r\n");
+    await invoke("install_browser").catch((e) =>
+      write(`\r\n\x1b[31mBrowser installation failed: ${e}\x1b[0m\r\n`)
+    );
+  }, [write]);
+
   return {
     sendInput,
     interrupt,
@@ -431,6 +438,7 @@ export function useAgent() {
     fetchCatalog,
     startDownload,
     cancelDownload,
+    installBrowser,
     downloadProgress,
     downloadedModelPath,
     modelCatalog,

@@ -26,6 +26,7 @@ pub fn run() {
             commands::get_download_catalog,
             commands::start_model_download,
             commands::cancel_model_download,
+            commands::install_browser,
             commands::send_tool_ack,
         ])
         .run(tauri::generate_context!())

@@ -151,3 +151,9 @@ pub async fn cancel_model_download(app: AppHandle) -> Result<(), String> {
     let payload = serde_json::json!({"type": "download_cancel"});
     write_to_sidecar(&app, payload).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn install_browser(app: AppHandle) -> Result<(), String> {
+    let payload = serde_json::json!({"type": "install_browsers"});
+    write_to_sidecar(&app, payload).map_err(|e| e.to_string())
+}

@@ -21,5 +21,6 @@
 # ── Memory probing (optional but recommended for auto backend selection) ───────
 psutil>=5.9
 
-# ── Build tool (for PyInstaller sidecar packaging) ────────────────────────────
-# pyinstaller>=6.0
+# ── Web / Network tools ───────────────────────────────────────────────────────
+httpx>=0.25.0
+playwright>=1.40.0

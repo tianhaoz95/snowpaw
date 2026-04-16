@@ -70,7 +70,7 @@ export default function MenuBar({
           textShadow: "0 0 8px #ff2d9888",
         }}
       >
-        SnowPaw
+        CyberPaw
       </span>
 
       <MenuButton onClick={onOpenFolder} title="Open folder">

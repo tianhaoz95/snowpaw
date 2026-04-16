@@ -37,7 +37,7 @@ const DEFAULT_CONFIG: AppConfig = {
   network_enabled: false,
 };
 
-const LS_KEY = "snowpaw_config";
+const LS_KEY = "cyberpaw_config";
 
 function readLocalStorage(): AppConfig {
   try {

@@ -1,4 +1,4 @@
-# SnowPaw — Design Document
+# CyberPaw — Design Document
 
 > A fully local, all-in-one coding agent desktop app.
 > Tauri shell · Python sidecar · Gemma 4 (E4B MoE) · minimal multi-agent harness
@@ -7,7 +7,7 @@
 
 ## 1. Vision
 
-SnowPaw is a desktop application that looks and feels like a terminal-based coding agent (similar to Claude Code) but runs **entirely offline**. No API keys, no cloud calls. The LLM is Gemma 4 E4B (a 4-billion-parameter MoE model) loaded via **AirLLM** when memory is constrained or **llama.cpp** when sufficient RAM/VRAM is available. The agent harness is a minimal Python reimplementation of the multi-agent loop observed in `./claude-code`.
+CyberPaw is a desktop application that looks and feels like a terminal-based coding agent (similar to Claude Code) but runs **entirely offline**. No API keys, no cloud calls. The LLM is Gemma 4 E4B (a 4-billion-parameter MoE model) loaded via **AirLLM** when memory is constrained or **llama.cpp** when sufficient RAM/VRAM is available. The agent harness is a minimal Python reimplementation of the multi-agent loop observed in `./claude-code`.
 
 ---
 
@@ -36,7 +36,7 @@ SnowPaw is a desktop application that looks and feels like a terminal-based codi
 │  └─────────┬──────────────────────────────────────────────────┘  │
 │            │  stdin/stdout (newline-delimited JSON)               │
 │  ┌─────────▼──────────────────────────────────────────────────┐  │
-│  │              Python Sidecar  (snowpaw-agent)               │  │
+│  │              Python Sidecar  (cyberpaw-agent)               │  │
 │  │                                                            │  │
 │  │  ┌──────────────────────────────────────────────────────┐  │  │
 │  │  │                  Agent Harness                       │  │  │
@@ -71,10 +71,10 @@ SnowPaw is a desktop application that looks and feels like a terminal-based codi
 | Sidecar spawn | `tauri-plugin-shell` sidecar, binary bundled in `src-tauri/binaries/` |
 | IPC bridge | `invoke()` for commands, `emit()`/`listen()` for streaming events |
 | File open dialog | `tauri-plugin-dialog` → returns path → sent to sidecar |
-| Config persistence | `tauri-plugin-store` → `snowpaw.conf.json` in app data dir |
+| Config persistence | `tauri-plugin-store` → `cyberpaw.conf.json` in app data dir |
 | Auto-update (optional) | `tauri-plugin-updater` |
 
-**Sidecar binary name:** `snowpaw-agent-<target-triple>` (e.g. `snowpaw-agent-aarch64-apple-darwin`).  
+**Sidecar binary name:** `cyberpaw-agent-<target-triple>` (e.g. `cyberpaw-agent-aarch64-apple-darwin`).  
 Built with PyInstaller or Nuitka, bundled as a Tauri external binary.
 
 **Tauri commands (Rust → exposed to JS):**
@@ -135,7 +135,7 @@ A slide-in panel (not a new window) with:
 
 ---
 
-### 3.3 Python Sidecar (`snowpaw-agent`)
+### 3.3 Python Sidecar (`cyberpaw-agent`)
 
 The sidecar is a single Python process. It communicates with the Tauri core over **stdin/stdout** using newline-delimited JSON (NDJSON).
 
@@ -303,7 +303,7 @@ Maximum sub-agent nesting depth: **3**.
 
 - **Context window:** Configurable, default 8192 tokens.
 - **Compaction:** When the message list exceeds 75% of the context window (measured by a simple character-count heuristic), older tool result messages are summarized and replaced with a `[compacted N tool results]` placeholder. This mirrors `claude-code/src/commands/compact/`.
-- **Session storage:** Full conversation history is written to `~/.snowpaw/sessions/<uuid>.jsonl` on each turn for resumability.
+- **Session storage:** Full conversation history is written to `~/.cyberpaw/sessions/<uuid>.jsonl` on each turn for resumability.
 
 ---
 
@@ -434,7 +434,7 @@ Gemma 4 uses the standard Gemma instruction-tuning template:
 ## 4. Repository Layout
 
 ```
-snowpaw/
+cyberpaw/
 ├── design/
 │   └── DESIGN.md               ← this document
 │
@@ -555,7 +555,7 @@ snowpaw/
 The default system prompt (in `agent/prompt/system_prompt.py`) establishes the agent's identity and operating rules:
 
 ```
-You are SnowPaw, a local coding assistant running on this machine.
+You are CyberPaw, a local coding assistant running on this machine.
 You have access to the user's filesystem and shell. You help with
 programming tasks: reading code, making edits, running tests, and
 explaining concepts.
@@ -601,7 +601,7 @@ The app ships **without** the model weights (too large). On first launch, a setu
 1. Download the GGUF automatically (via `scripts/download-model.sh` invoked from the frontend), or
 2. Point to an existing local model file.
 
-Model path is stored in `snowpaw.conf.json`.
+Model path is stored in `cyberpaw.conf.json`.
 
 ---
 
@@ -614,11 +614,11 @@ Model path is stored in `snowpaw.conf.json`.
 cd agent && pip install -r requirements.txt
 
 # Build sidecar
-./scripts/build-sidecar.sh   # outputs agent/dist/snowpaw-agent
+./scripts/build-sidecar.sh   # outputs agent/dist/cyberpaw-agent
 
 # Copy to Tauri binaries
-cp agent/dist/snowpaw-agent \
-   src-tauri/binaries/snowpaw-agent-aarch64-apple-darwin
+cp agent/dist/cyberpaw-agent \
+   src-tauri/binaries/cyberpaw-agent-aarch64-apple-darwin
 
 # Run dev
 npm run tauri dev
@@ -628,9 +628,9 @@ npm run tauri dev
 
 ```bash
 npm run tauri build
-# → src-tauri/target/release/bundle/dmg/SnowPaw_*.dmg  (macOS)
-# → src-tauri/target/release/bundle/nsis/SnowPaw_*.exe (Windows)
-# → src-tauri/target/release/bundle/deb/snowpaw_*.deb  (Linux)
+# → src-tauri/target/release/bundle/dmg/CyberPaw_*.dmg  (macOS)
+# → src-tauri/target/release/bundle/nsis/CyberPaw_*.exe (Windows)
+# → src-tauri/target/release/bundle/deb/cyberpaw_*.deb  (Linux)
 ```
 
 The sidecar binary is embedded in the app bundle by Tauri's `externalBin` mechanism. The model weights are downloaded post-install.

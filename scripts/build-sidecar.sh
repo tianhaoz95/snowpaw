@@ -57,7 +57,7 @@ if spec and spec.origin:
 # Build PyInstaller args
 PYINSTALLER_ARGS=(
   --onefile
-  --name snowpaw-agent
+  --name cyberpaw-agent
   --distpath "$AGENT_DIR/dist"
   --workpath "$AGENT_DIR/build"
   --specpath "$AGENT_DIR/build"
@@ -87,13 +87,13 @@ cd "$AGENT_DIR"
 
 # Copy with Tauri's required naming convention
 mkdir -p "$BINARIES_DIR"
-DEST="$BINARIES_DIR/snowpaw-agent-$TARGET_TRIPLE"
+DEST="$BINARIES_DIR/cyberpaw-agent-$TARGET_TRIPLE"
 
 if [[ "$TARGET_TRIPLE" == *"windows"* ]]; then
-  cp "$AGENT_DIR/dist/snowpaw-agent.exe" "$DEST.exe"
+  cp "$AGENT_DIR/dist/cyberpaw-agent.exe" "$DEST.exe"
   echo "Copied to: $DEST.exe"
 else
-  cp "$AGENT_DIR/dist/snowpaw-agent" "$DEST"
+  cp "$AGENT_DIR/dist/cyberpaw-agent" "$DEST"
   chmod +x "$DEST"
   echo "Copied to: $DEST"
 fi

@@ -357,7 +357,7 @@ export function useAgent() {
   const resetSession = useCallback(async () => {
     await invoke("reset_session").catch(() => {});
     write("\x1b[2J\x1b[H"); // clear screen
-    write("\x1b[32mSnowPaw\x1b[0m — session reset.\r\n\r\n");
+    write("\x1b[32mCyberPaw\x1b[0m — session reset.\r\n\r\n");
     write("\x1b[32m❯\x1b[0m ");
   }, [write]);
 

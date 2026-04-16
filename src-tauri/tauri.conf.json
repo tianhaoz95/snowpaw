@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SnowPaw",
+  "productName": "CyberPaw",
   "version": "0.1.0",
-  "identifier": "dev.snowpaw.app",
+  "identifier": "dev.cyberpaw.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SnowPaw",
+        "title": "CyberPaw",
         "width": 1100,
         "height": 720,
         "minWidth": 600,
@@ -37,7 +37,7 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/snowpaw-agent"
+      "binaries/cyberpaw-agent"
     ]
   },
   "plugins": {

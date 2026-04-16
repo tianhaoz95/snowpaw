@@ -2,7 +2,7 @@
 
 Design
 ------
-* TodoWrite   — writes a markdown checklist to ``.snowpaw_todos.md`` in the
+* TodoWrite   — writes a markdown checklist to ``.cyberpaw_todos.md`` in the
                 working directory.  Simple and persistent; no in-memory state.
 
 * Task*       — lightweight in-memory task store keyed by ``session_id``
@@ -21,7 +21,7 @@ Task schema
 TaskStop cancels the asyncio.Task tracked in ``_running`` if one exists for
 that task id; otherwise it just marks the status as "cancelled".
 
-TaskOutput is a no-op stub that returns the task's summary — SnowPaw does not
+TaskOutput is a no-op stub that returns the task's summary — CyberPaw does not
 run background asyncio workers yet, but the API surface is in place.
 """
 
@@ -118,7 +118,7 @@ _STORE = _TaskStore()
 class TodoWriteTool(Tool):
     name = "TodoWrite"
     description = (
-        "Write a persistent to-do list to .snowpaw_todos.md in the current "
+        "Write a persistent to-do list to .cyberpaw_todos.md in the current "
         "working directory.  Pass a list of todo items; the file is completely "
         "overwritten each call so you always have the latest state.  "
         "Use this to track multi-step work across conversation turns."
@@ -147,7 +147,7 @@ class TodoWriteTool(Tool):
 
     async def call(self, input: dict, ctx: ToolContext) -> ToolResult:
         todos: list[dict] = input.get("todos", [])
-        lines = ["# SnowPaw To-Do List\n"]
+        lines = ["# CyberPaw To-Do List\n"]
         for item in todos:
             text = item.get("text", "").strip()
             done = bool(item.get("done", False))
@@ -155,7 +155,7 @@ class TodoWriteTool(Tool):
             lines.append(f"- [{check}] {text}\n")
 
         content = "".join(lines)
-        dest = os.path.join(ctx.working_directory, ".snowpaw_todos.md")
+        dest = os.path.join(ctx.working_directory, ".cyberpaw_todos.md")
         try:
             with open(dest, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -164,7 +164,7 @@ class TodoWriteTool(Tool):
 
         total = len(todos)
         done_count = sum(1 for t in todos if t.get("done"))
-        summary = f"Wrote {total} todos ({done_count} done) to .snowpaw_todos.md"
+        summary = f"Wrote {total} todos ({done_count} done) to .cyberpaw_todos.md"
         return ToolResult.ok(f"Saved {total} todos to {dest}", summary)
 
 
@@ -355,7 +355,7 @@ class TaskOutputTool(Tool):
     name = "TaskOutput"
     description = (
         "Get the current output / result summary for a task.  "
-        "SnowPaw does not run true background workers yet, so this returns "
+        "CyberPaw does not run true background workers yet, so this returns "
         "the task's metadata.  The API is in place for future expansion."
     )
     input_schema = {

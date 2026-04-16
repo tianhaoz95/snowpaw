@@ -118,12 +118,12 @@ export default function ModelDownloader({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <label style={{ color: "#ffffff", fontSize: 11 }}>
-          Save to (leave blank for ~/models/snowpaw/)
+          Save to (leave blank for ~/models/cyberpaw/)
         </label>
         <input
           value={destDir}
           onChange={(e) => setDestDir(e.target.value)}
-          placeholder="~/models/snowpaw"
+          placeholder="~/models/cyberpaw"
           disabled={isDownloading}
           style={inputStyle}
         />

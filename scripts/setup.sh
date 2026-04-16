@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# SnowPaw — setup.sh
+# CyberPaw — setup.sh
 # =============================================================================
 # One-shot setup script. Run once from the repo root:
 #

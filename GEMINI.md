@@ -1,6 +1,6 @@
-# SnowPaw — Gemini CLI Context
+# CyberPaw — Gemini CLI Context
 
-SnowPaw is a fully local, all-in-one coding agent desktop application. It provides a terminal-based interface (similar to Claude Code) but runs entirely offline using local LLMs (Gemma 4 MoE) via a Python sidecar.
+CyberPaw is a fully local, all-in-one coding agent desktop application. It provides a terminal-based interface (similar to Claude Code) but runs entirely offline using local LLMs (Gemma 4 MoE) via a Python sidecar.
 
 ## Project Overview
 
@@ -8,7 +8,7 @@ SnowPaw is a fully local, all-in-one coding agent desktop application. It provid
 - **Architecture:** 
     - **Frontend:** React + TypeScript + Vite, using `xterm.js` for the terminal UI.
     - **Native Shell:** Tauri (Rust) manages the window, configuration persistence, and the sidecar lifecycle.
-    - **Sidecar:** A Python process (`snowpaw-agent`) that hosts the agent harness and LLM backends.
+    - **Sidecar:** A Python process (`cyberpaw-agent`) that hosts the agent harness and LLM backends.
     - **Communication:** Newline-delimited JSON (NDJSON) over standard I/O (stdin/stdout).
 - **LLM Backends:**
     - `llama.cpp`: High-performance GGUF inference (recommended for 16GB+ RAM).
@@ -53,7 +53,7 @@ SnowPaw is a fully local, all-in-one coding agent desktop application. It provid
     ```
 
 ### Model Setup
-SnowPaw does not ship with model weights. Use the built-in downloader or run:
+CyberPaw does not ship with model weights. Use the built-in downloader or run:
 ```bash
 ./scripts/download-model.sh
 ```

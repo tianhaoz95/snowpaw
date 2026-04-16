@@ -6,12 +6,12 @@ Tests that the orchestrator correctly:
   2. Emits tool_start / tool_end events to the UI
   3. Executes the tool (Write) and creates the file on disk
 
-Run from the snowpaw/agent directory:
+Run from the cyberpaw/agent directory:
     ../tests/run_integration.sh
 or directly:
     PYTHONPATH=. python ../tests/test_integration_tool_call.py
 
-Requires: llama-cpp-python installed, model at ~/models/snowpaw/gemma-4-E2B-it-Q4_K_M.gguf
+Requires: llama-cpp-python installed, model at ~/models/cyberpaw/gemma-4-E2B-it-Q4_K_M.gguf
 Working directory: ~/Downloads/temp  (created if absent)
 """
 
@@ -26,7 +26,7 @@ import time
 AGENT_DIR = os.path.join(os.path.dirname(__file__), "..", "agent")
 sys.path.insert(0, os.path.abspath(AGENT_DIR))
 
-MODEL_PATH = os.path.expanduser("~/models/snowpaw/gemma-4-E2B-it-Q4_K_M.gguf")
+MODEL_PATH = os.path.expanduser("~/models/cyberpaw/gemma-4-E2B-it-Q4_K_M.gguf")
 WORK_DIR = os.path.expanduser("~/Downloads/temp")
 TARGET_FILE = os.path.join(WORK_DIR, "README.md")
 

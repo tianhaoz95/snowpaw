@@ -42,7 +42,7 @@ async def test_todo_write(tmpdir: str) -> None:
         ctx,
     )
     assert not result.is_error, f"Expected ok, got error: {result.output}"
-    dest = os.path.join(tmpdir, ".snowpaw_todos.md")
+    dest = os.path.join(tmpdir, ".cyberpaw_todos.md")
     assert os.path.exists(dest), "Todos file not created"
     content = open(dest).read()
     assert "- [ ] Write unit tests" in content

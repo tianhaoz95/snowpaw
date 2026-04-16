@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capabilities for SnowPaw","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-start-dragging","shell:allow-execute","shell:allow-open","dialog:default","fs:default","store:default"]}}
+{"default":{"identifier":"default","description":"Default capabilities for CyberPaw","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-start-dragging","shell:allow-execute","shell:allow-open","dialog:default","fs:default","store:default"]}}

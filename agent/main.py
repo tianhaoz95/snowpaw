@@ -1,5 +1,5 @@
 """
-SnowPaw Agent — Sidecar Entry Point
+CyberPaw Agent — Sidecar Entry Point
 =====================================
 Reads NDJSON commands from stdin, runs the agent harness, and writes
 NDJSON events to stdout.  This process is spawned by Tauri as a sidecar
@@ -50,7 +50,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-log = logging.getLogger("snowpaw.main")
+log = logging.getLogger("cyberpaw.main")
 
 
 def emit(event: dict) -> None:
@@ -156,7 +156,7 @@ async def main() -> None:
     # ── Default configuration ─────────────────────────────────────────────────
     working_directory = os.path.expanduser("~")
     backend_kind = BackendKind.AUTO
-    model_path = os.environ.get("SNOWPAW_MODEL_PATH", "")
+    model_path = os.environ.get("CYBERPAW_MODEL_PATH", "")
     context_size = 8192
     max_new_tokens = 2048
     temperature = 0.2
@@ -234,7 +234,7 @@ async def main() -> None:
     protocol = asyncio.StreamReaderProtocol(reader)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin)
 
-    log.info("SnowPaw agent ready (backend=%s)", backend.name)
+    log.info("CyberPaw agent ready (backend=%s)", backend.name)
 
     while True:
         try:
@@ -337,7 +337,7 @@ async def main() -> None:
             from downloader import start_download
             model_id = msg.get("model_id", "")
             dest_dir = os.path.expanduser(
-                msg.get("dest_dir") or os.path.join(os.path.expanduser("~"), "models", "snowpaw")
+                msg.get("dest_dir") or os.path.join(os.path.expanduser("~"), "models", "cyberpaw")
             )
             hf_token = msg.get("hf_token", "")
             asyncio.create_task(

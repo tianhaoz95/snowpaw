@@ -4,13 +4,13 @@
 # Usage:
 #   ./scripts/download-model.sh [output_dir]
 #
-# Default output dir: ~/models/snowpaw/
+# Default output dir: ~/models/cyberpaw/
 #
 # Requires: curl or wget
 
 set -euo pipefail
 
-OUTPUT_DIR="${1:-$HOME/models/snowpaw}"
+OUTPUT_DIR="${1:-$HOME/models/cyberpaw}"
 mkdir -p "$OUTPUT_DIR"
 
 # Gemma 4 E4B Q4_K_M GGUF (≈3.5 GB)
@@ -46,7 +46,7 @@ echo ""
 echo "Model saved to: $DEST"
 echo ""
 echo "Next steps:"
-echo "  1. Open SnowPaw"
+echo "  1. Open CyberPaw"
 echo "  2. Go to Settings → Model Path"
 echo "  3. Set the path to: $DEST"
 echo "  4. Restart the app"

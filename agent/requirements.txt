@@ -1,4 +1,4 @@
-# SnowPaw Agent — Python dependencies
+# CyberPaw Agent — Python dependencies
 #
 # Install with:  pip install -r requirements.txt
 #

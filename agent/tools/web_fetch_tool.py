@@ -180,7 +180,7 @@ class WebFetchTool(Tool):
             async with httpx.AsyncClient(
                 follow_redirects=True,
                 timeout=timeout,
-                headers={"User-Agent": "SnowPaw/1.0 (local AI assistant)"},
+                headers={"User-Agent": "CyberPaw/1.0 (local AI assistant)"},
             ) as client:
                 response = await client.get(url)
         except httpx.TimeoutException:

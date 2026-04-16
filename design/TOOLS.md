@@ -1,6 +1,6 @@
-# SnowPaw — Tool Analysis Report
+# CyberPaw — Tool Analysis Report
 
-> Comparing claude-code's tool surface against SnowPaw's implementation.
+> Comparing claude-code's tool surface against CyberPaw's implementation.
 > Generated: 2026-04-14
 
 ---
@@ -102,7 +102,7 @@ Claude Code (TypeScript) exposes **40+ tools** organised into functional groups.
 
 ---
 
-## 2. Tools Implemented in `./snowpaw` (as of 2026-04-14)
+## 2. Tools Implemented in `./cyberpaw` (as of 2026-04-14)
 
 ### 2.1 File & Code Operations
 | Tool | Read-only | Status |
@@ -150,9 +150,9 @@ Claude Code (TypeScript) exposes **40+ tools** organised into functional groups.
 
 ## 3. Gap Analysis — File Operations
 
-The file-ops category in claude-code that SnowPaw was missing:
+The file-ops category in claude-code that CyberPaw was missing:
 
-| claude-code tool | SnowPaw equivalent | Gap |
+| claude-code tool | CyberPaw equivalent | Gap |
 |---|---|---|
 | `Read` | `Read` | covered |
 | `FileWrite` | `Write` | covered |
@@ -169,7 +169,7 @@ The file-ops category in claude-code that SnowPaw was missing:
 
 ## 4. Recommended Next Tools (Priority Order)
 
-These are tools beyond file ops that would most benefit SnowPaw given its offline,
+These are tools beyond file ops that would most benefit CyberPaw given its offline,
 small-model constraints:
 
 ### Tier 1 — High value, low complexity
@@ -207,7 +207,7 @@ small-model constraints:
 
 ### Tool calling mechanism
 
-SnowPaw uses **XML-structured tool calls** injected into the prompt because Gemma 4
+CyberPaw uses **XML-structured tool calls** injected into the prompt because Gemma 4
 is not function-calling tuned:
 
 ```xml
@@ -234,7 +234,7 @@ Each tool is a Python class inheriting from `Tool` (ABC) in
 
 ### Key differences from claude-code
 
-| Aspect | claude-code | SnowPaw |
+| Aspect | claude-code | CyberPaw |
 |---|---|---|
 | Language | TypeScript | Python |
 | LLM | Claude API (remote) | Gemma 4 E2B/E4B (local) |

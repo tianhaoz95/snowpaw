@@ -1,1 +1,1 @@
-# SnowPaw Agent sidecar package
+# CyberPaw Agent sidecar package

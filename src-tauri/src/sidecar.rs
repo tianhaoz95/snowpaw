@@ -11,7 +11,7 @@ pub struct SidecarState {
 pub fn spawn_sidecar(app: AppHandle) -> anyhow::Result<()> {
     let sidecar_cmd = app
         .shell()
-        .sidecar("snowpaw-agent")
+        .sidecar("cyberpaw-agent")
         .map_err(|e| anyhow::anyhow!("sidecar not found: {e}"))?;
 
     let (mut rx, child) = sidecar_cmd.spawn()?;

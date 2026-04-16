@@ -1,0 +1,1 @@
+# SnowPaw Agent sidecar package

@@ -141,14 +141,10 @@ async def _install_browsers() -> None:
         # However, it uses synchronous blocking calls.
         # The most reliable way in a bundle is to use the 'playwright' module entry point.
         import subprocess
+        import re
         
         # Heuristic: if we are in a bundle, use the same executable
-        # If not, use sys.executable
         executable = sys.executable
-        
-        # In the bundle, playwright CLI might be accessible via -m playwright
-        # but only if correctly collected.
-        
         cmd = [executable, "-m", "playwright", "install", "chromium"]
         
         proc = await asyncio.create_subprocess_exec(
@@ -157,13 +153,31 @@ async def _install_browsers() -> None:
             stderr=asyncio.subprocess.STDOUT,
         )
         assert proc.stdout is not None
+        
+        # Regex to match percentage in playwright output (e.g. "  12% ")
+        pct_re = re.compile(r"(\d+)%")
+        
         while True:
             line = await proc.stdout.readline()
             if not line:
                 break
             text = line.decode().strip()
             if text:
-                emit({"type": "model_progress", "stage": "loading", "pct": 50, "text": text})
+                # Extract percentage if present, else keep last known or default to 50
+                match = pct_re.search(text)
+                pct = int(match.group(1)) if match else 50
+                # Use a more descriptive text
+                display_text = f"Installing Chromium: {text}"
+                if len(display_text) > 60:
+                    display_text = display_text[:57] + "..."
+                
+                emit({
+                    "type": "model_progress", 
+                    "stage": "loading", 
+                    "pct": pct, 
+                    "text": display_text,
+                    "backend": "Browser"
+                })
         
         exit_code = await proc.wait()
         if exit_code == 0:

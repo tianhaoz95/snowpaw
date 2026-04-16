@@ -9,6 +9,7 @@ export interface LoadProgress {
   pct: number;
   backend: string;
   heartbeat?: boolean;
+  text?: string;
 }
 
 interface Props {
@@ -65,9 +66,9 @@ export default function ModelLoadProgress({ progress }: Props) {
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ color: "#ffffff", fontSize: 11 }}>
-          {isDone
+          {progress.text ? progress.text : (isDone
             ? `✓ ${progress.backend} ready`
-            : `Loading ${progress.backend}…`}
+            : `Loading ${progress.backend}…`)}
         </span>
         <span
           style={{

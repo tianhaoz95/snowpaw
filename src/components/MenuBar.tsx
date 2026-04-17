@@ -41,6 +41,21 @@ export default function MenuBar({
   onNewSession,
   onOpenSettings,
 }: Props) {
+  const handleMinimize = () => { getCurrentWindow().minimize().catch(() => {}); };
+  const handleToggleMaximize = async () => {
+    const w = getCurrentWindow();
+    try {
+      const maximized = await w.isMaximized();
+      if (maximized) {
+        await w.unmaximize();
+      } else {
+        await w.maximize();
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+  const handleClose = () => { getCurrentWindow().close().catch(() => {}); };
   return (
     <div
       onMouseDown={handleDragStart}
@@ -133,7 +148,7 @@ export default function MenuBar({
       {/* Window Controls */}
       <div style={{ display: "flex", gap: 0 }}>
         <WindowControlButton
-          onClick={() => getCurrentWindow().minimize()}
+          onClick={handleMinimize}
           title="Minimize"
         >
           <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
@@ -141,7 +156,7 @@ export default function MenuBar({
           </svg>
         </WindowControlButton>
         <WindowControlButton
-          onClick={() => getCurrentWindow().toggleMaximize()}
+          onClick={handleToggleMaximize}
           title="Maximize"
         >
           <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
@@ -149,7 +164,7 @@ export default function MenuBar({
           </svg>
         </WindowControlButton>
         <WindowControlButton
-          onClick={() => getCurrentWindow().close()}
+          onClick={handleClose}
           title="Close"
           hoverColor="#ff4444"
         >

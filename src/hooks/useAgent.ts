@@ -273,7 +273,7 @@ export function useAgent() {
           });
         } else if (msg.stage === "ready") {
           setLoadProgress({ pct: 100, backend });
-          write(`\r\x1b[38;2;255;45;152mModel ready.\x1b[0m\r\n\x1b[38;2;255;45;152m❯\x1b[0m `);
+          // App.tsx handles the "Model ready." print to coordinate with the spinner.
         }
       } else if (type === "model_status") {
         setModelStatus({
@@ -384,7 +384,6 @@ export function useAgent() {
 
   const loadModel = useCallback(
     async (modelPath: string, backend?: string) => {
-      write(`\x1b[33mLoading model: ${modelPath}\x1b[0m\r\n`);
       await invoke("load_model", {
         modelPath,
         backend: backend ?? null,

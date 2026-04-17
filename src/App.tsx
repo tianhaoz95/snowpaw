@@ -37,11 +37,15 @@ export default function App() {
 
   // Clear the spinner as soon as the model reports loaded.
   useEffect(() => {
-    if (modelStatus.loaded && spinnerTimerRef.current !== null) {
-      clearInterval(spinnerTimerRef.current);
-      spinnerTimerRef.current = null;
+    if (modelStatus.loaded) {
+      if (spinnerTimerRef.current !== null) {
+        clearInterval(spinnerTimerRef.current);
+        spinnerTimerRef.current = null;
+        // \x1b[2K clears the line, \r moves to the start.
+        writeTerminal("\x1b[2K\r\x1b[38;2;255;45;152mModel ready.\x1b[0m\r\n\x1b[38;2;255;45;152m❯\x1b[0m ");
+      }
     }
-  }, [modelStatus.loaded]);
+  }, [modelStatus.loaded, writeTerminal]);
   useEffect(() => {
     if (autoLoadedRef.current) return;
     autoLoadedRef.current = true;
@@ -53,12 +57,14 @@ export default function App() {
         let i = 0;
         const P = "\x1b[38;2;255;45;152m";
         const R = "\x1b[0m";
-        // Write initial line
-        writeTerminal(`${P}${frames[0]}${R} Loading model…`);
+        const modelName = config.model_path.split(/[/\\]/).pop();
+        
+        // Initial line — NO newline, the spinner will stay on this line via \r
+        writeTerminal(`${P}${frames[0]}${R} Loading ${modelName}…`);
         spinnerTimerRef.current = setInterval(() => {
           i = (i + 1) % frames.length;
           // \r moves to start of line, rewrite in place
-          writeTerminal(`\r${P}${frames[i]}${R} Loading model…`);
+          writeTerminal(`\r${P}${frames[i]}${R} Loading ${modelName}…`);
         }, 80);
         loadModel(config.model_path, config.backend);
       } else {

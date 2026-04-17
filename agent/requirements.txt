@@ -16,7 +16,7 @@
 #   CMAKE_ARGS="-DLLAMA_METAL=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
 
 # AirLLM (for machines with <8GB RAM):
-#   pip install airllm transformers accelerate
+#   pip install airllm transformers accelerate huggingface-hub
 
 # ── Memory probing (optional but recommended for auto backend selection) ───────
 psutil>=5.9

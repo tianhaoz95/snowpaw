@@ -41,6 +41,7 @@ class ModelEntry:
     quant: str
     sha256: str = ""       # optional checksum; empty = skip verification
     requires_hf_token: bool = False
+    is_hf_repo: bool = False
 
 
 # Curated list of locally-runnable models.
@@ -54,6 +55,26 @@ MODEL_CATALOG: list[ModelEntry] = [
         filename="gemma-4-E2B-it-Q4_K_M.gguf",
         size_gb=2.9,
         quant="Q4_K_M",
+    ),
+    ModelEntry(
+        id="gemma-4-e2b-airllm",
+        name="Gemma 4 E2B (AirLLM 4-bit)",
+        description="2B MoE · 1.5 GB · Optimized for AirLLM backend · 4-bit BnB",
+        url="unsloth/gemma-4-E2B-it-unsloth-bnb-4bit",
+        filename="gemma-4-E2B-it-airllm-4bit",
+        size_gb=1.5,
+        quant="4-bit BnB (AirLLM)",
+        is_hf_repo=True,
+    ),
+    ModelEntry(
+        id="gemma-4-e4b-airllm",
+        name="Gemma 4 E4B (AirLLM 4-bit)",
+        description="4B MoE · 3.0 GB · Optimized for AirLLM backend · 4-bit BnB",
+        url="unsloth/gemma-4-E4B-it-unsloth-bnb-4bit",
+        filename="gemma-4-E4B-it-airllm-4bit",
+        size_gb=3.0,
+        quant="4-bit BnB (AirLLM)",
+        is_hf_repo=True,
     ),
     ModelEntry(
         id="gemma-4-e4b-q4km",
@@ -96,6 +117,7 @@ def get_catalog() -> list[dict]:
             "size_gb": m.size_gb,
             "quant": m.quant,
             "requires_hf_token": m.requires_hf_token,
+            "is_hf_repo": m.is_hf_repo,
         }
         for m in MODEL_CATALOG
     ]
@@ -188,6 +210,91 @@ async def _download_task(
         emit({"type": "download_error", "model_id": entry.id, "message": str(exc)})
 
 
+async def _download_hf_repo(
+    entry: ModelEntry,
+    dest_path: str,
+    cancel: asyncio.Event,
+    emit: Callable[[dict], None],
+    hf_token: str,
+) -> None:
+    """Download a full HF repo (Safetensors) to a directory."""
+    try:
+        from huggingface_hub import snapshot_download  # type: ignore
+    except ImportError:
+        raise RuntimeError(
+            "huggingface-hub not installed. "
+            "Run: pip install huggingface-hub"
+        )
+
+    if entry.requires_hf_token and not hf_token:
+        raise RuntimeError(
+            "This model requires a HuggingFace token. "
+            "Please provide one in Settings."
+        )
+
+    # For HF repos, dest_path is the directory.
+    # If it exists as a file, remove it first.
+    if os.path.exists(dest_path) and os.path.isfile(dest_path):
+        os.remove(dest_path)
+    os.makedirs(dest_path, exist_ok=True)
+
+    emit({
+        "type": "download_progress",
+        "model_id": entry.id,
+        "pct": 1,
+        "downloaded_mb": 0.0,
+        "total_mb": entry.size_gb * 1024,
+        "speed_mbps": 0.0,
+    })
+
+    def _do_snapshot():
+        return snapshot_download(
+            repo_id=entry.url,
+            local_dir=dest_path,
+            token=hf_token or None,
+            local_dir_use_symlinks=False,
+            # snapshot_download is quiet by default in threads,
+            # but we can't easily get real-time progress without a callback.
+        )
+
+    loop = asyncio.get_event_loop()
+    
+    # Heartbeat to keep the UI "moving"
+    stop_heartbeat = False
+    async def _heartbeat():
+        p = 5
+        while not stop_heartbeat:
+            await asyncio.sleep(2.0)
+            if stop_heartbeat: break
+            p = min(p + 1, 98)
+            emit({
+                "type": "download_progress",
+                "model_id": entry.id,
+                "pct": p,
+                "downloaded_mb": 0.0,
+                "total_mb": entry.size_gb * 1024,
+                "speed_mbps": 0.0,
+            })
+    
+    heartbeat_task = asyncio.create_task(_heartbeat())
+
+    try:
+        await loop.run_in_executor(None, _do_snapshot)
+    finally:
+        stop_heartbeat = True
+        heartbeat_task.cancel()
+
+    emit({
+        "type": "download_progress",
+        "model_id": entry.id,
+        "pct": 100,
+        "downloaded_mb": entry.size_gb * 1024,
+        "total_mb": entry.size_gb * 1024,
+        "speed_mbps": 0.0,
+    })
+    emit({"type": "download_done", "model_id": entry.id, "path": dest_path})
+
+
 async def _download(
     entry: ModelEntry,
     dest_path: str,
@@ -195,6 +302,10 @@ async def _download(
     emit: Callable[[dict], None],
     hf_token: str,
 ) -> None:
+    if entry.is_hf_repo:
+        await _download_hf_repo(entry, dest_path, cancel, emit, hf_token)
+        return
+
     loop = asyncio.get_event_loop()
 
     # Check existing partial file for resume

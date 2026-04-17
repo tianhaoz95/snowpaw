@@ -211,9 +211,9 @@ else
   fi
 
   if [ "$BACKEND" = "airllm" ] || [ "$BACKEND" = "both" ]; then
-    info "Installing airllm + transformers + accelerate..."
-    $PIP airllm transformers accelerate
-    success "airllm, transformers, accelerate"
+    info "Installing airllm + transformers + accelerate + huggingface-hub..."
+    $PIP airllm transformers accelerate huggingface-hub
+    success "airllm, transformers, accelerate, huggingface-hub"
   fi
 fi
 

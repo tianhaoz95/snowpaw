@@ -52,11 +52,19 @@ class AirLLMBackend(LLMBackend):
                 ) from exc
 
             self._tokenizer = AutoTokenizer.from_pretrained(model_path)
+            
+            # If the model is already 4-bit quantized (indicated by our filename convention),
+            # we don't need to apply additional compression during load.
+            compression = "4bit"
+            if "airllm-4bit" in model_path:
+                compression = None
+                log.info("Model already 4-bit, skipping on-the-fly compression")
+
             # AirLLM loads layers on demand; this call sets up the model
             # without pulling all weights into memory at once.
             self._model = AutoModel.from_pretrained(
                 model_path,
-                compression="4bit",   # quantise layers as they load
+                compression=compression,
             )
 
         await asyncio.to_thread(_load)

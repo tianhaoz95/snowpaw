@@ -3,7 +3,7 @@ Model Runner — Base Layer
 =========================
 Defines the abstract interface all LLM backends must implement.
 The agent harness only ever talks to LLMBackend; concrete backends
-(AirLLM, llama.cpp) are swapped in by the selector at startup.
+are swapped in by the selector at startup.
 """
 
 from __future__ import annotations
@@ -62,8 +62,7 @@ class LLMBackend(abc.ABC):
         Parameters
         ----------
         model_path:
-            Path to a GGUF file (llama.cpp) or a HuggingFace model directory
-            (AirLLM / safetensors).
+            Path to a GGUF file (llama.cpp).
         on_progress:
             Callback called with integer percentages 0–100 during loading.
             Implementations should call it at least at 0 and 100.

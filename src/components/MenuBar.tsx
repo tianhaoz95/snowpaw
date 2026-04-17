@@ -127,7 +127,80 @@ export default function MenuBar({
             stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
         </svg>
       </MenuButton>
+
+      <div style={{ width: 4 }} />
+
+      {/* Window Controls */}
+      <div style={{ display: "flex", gap: 0 }}>
+        <WindowControlButton
+          onClick={() => getCurrentWindow().minimize()}
+          title="Minimize"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <rect x="2" y="8" width="12" height="1.5" rx="0.5" />
+          </svg>
+        </WindowControlButton>
+        <WindowControlButton
+          onClick={() => getCurrentWindow().toggleMaximize()}
+          title="Maximize"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+            <rect x="3.5" y="3.5" width="9" height="9" stroke="currentColor" strokeWidth="1.4" rx="0.5" />
+          </svg>
+        </WindowControlButton>
+        <WindowControlButton
+          onClick={() => getCurrentWindow().close()}
+          title="Close"
+          hoverColor="#ff4444"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+            <path d="M4 4l8 8M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </WindowControlButton>
+      </div>
     </div>
+  );
+}
+
+function WindowControlButton({
+  children,
+  onClick,
+  title,
+  hoverColor = "#ff2d98",
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title?: string;
+  hoverColor?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        background: "transparent",
+        border: "none",
+        color: "#666666",
+        cursor: "pointer",
+        padding: "8px 10px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        transition: "color 0.1s, background 0.1s",
+      }}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget as HTMLElement;
+        el.style.color = "#ffffff";
+        el.style.background = hoverColor === "#ff2d98" ? "#ff2d9822" : `${hoverColor}22`;
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLElement;
+        el.style.color = "#666666";
+        el.style.background = "transparent";
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

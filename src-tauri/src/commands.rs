@@ -8,7 +8,7 @@ use crate::sidecar::write_to_sidecar;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub working_directory: String,
-    pub backend: String,        // "auto" | "airllm" | "llamacpp"
+    pub backend: String,        // "auto" | "llamacpp"
     pub model_path: String,
     pub context_size: u32,
     pub max_new_tokens: u32,

@@ -67,10 +67,12 @@ PYINSTALLER_ARGS=(
   --hidden-import psutil
   --hidden-import httpx
   --hidden-import playwright
-  # Collect the entire llama_cpp, playwright and httpx packages
+  --hidden-import huggingface_hub
+  # Collect the entire llama_cpp, playwright, httpx packages
   --collect-all llama_cpp
   --collect-all playwright
   --collect-all httpx
+  --collect-all huggingface_hub
 )
 
 # If we found the llama_cpp lib dir, add all dylib/so files explicitly too

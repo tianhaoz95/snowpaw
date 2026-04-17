@@ -13,9 +13,6 @@
 #   4. Builds the Python sidecar binary
 #
 # Options:
-#   --backend llamacpp   Install llama-cpp-python (default, faster)
-#   --backend airllm     Install airllm + transformers (low-memory)
-#   --backend both       Install both backends
 #   --metal              Enable Metal GPU acceleration for llama.cpp (macOS)
 #   --skip-npm           Skip npm install
 #   --skip-python        Skip Python dep install
@@ -30,7 +27,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-BACKEND="llamacpp"
 METAL=false
 SKIP_NPM=false
 SKIP_PYTHON=false
@@ -53,7 +49,6 @@ header()  { echo -e "\n${BOLD}$*${RESET}"; }
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
   case "$1" in
-    --backend)   BACKEND="$2"; shift 2 ;;
     --metal)     METAL=true; shift ;;
     --skip-npm)  SKIP_NPM=true; shift ;;
     --skip-python) SKIP_PYTHON=true; shift ;;
@@ -110,7 +105,7 @@ success "npm $(npm --version)"
 
 # Python 3.11+
 PYTHON=""
-for cmd in python3.14 python3.13 python3.12 python3.11 python3; do
+for cmd in .venv/bin/python3 .venv/bin/python python3.14 python3.13 python3.12 python3.11 python3 python; do
   if command -v "$cmd" &>/dev/null; then
     VER=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "0.0")
     MAJOR=$(echo "$VER" | cut -d. -f1)
@@ -192,29 +187,17 @@ else
   $PIP psutil pyinstaller
   success "psutil, PyInstaller"
 
-  # LLM backend(s)
-  if [ "$BACKEND" != "llamacpp" ] && [ "$BACKEND" != "airllm" ] && [ "$BACKEND" != "both" ]; then
-    die "Unknown --backend value: $BACKEND. Use 'llamacpp', 'airllm', or 'both'."
-  fi
-
-  if [ "$BACKEND" = "llamacpp" ] || [ "$BACKEND" = "both" ]; then
+  # LLM backend
+  if $METAL && [ "$(uname)" = "Darwin" ]; then
+    info "Installing llama-cpp-python with Metal GPU acceleration..."
+    CMAKE_ARGS="-DLLAMA_METAL=on" \
+      "$VENV_PYTHON" -m pip install --quiet --upgrade --force-reinstall --no-cache-dir \
+      llama-cpp-python
+  else
     info "Installing llama-cpp-python..."
-    if $METAL && [ "$(uname)" = "Darwin" ]; then
-      info "  (Metal GPU acceleration enabled)"
-      CMAKE_ARGS="-DLLAMA_METAL=on" \
-        "$VENV_PYTHON" -m pip install --quiet --upgrade --force-reinstall --no-cache-dir \
-        llama-cpp-python
-    else
-      $PIP llama-cpp-python
-    fi
-    success "llama-cpp-python"
+    $PIP llama-cpp-python
   fi
-
-  if [ "$BACKEND" = "airllm" ] || [ "$BACKEND" = "both" ]; then
-    info "Installing airllm + transformers + accelerate + huggingface-hub..."
-    $PIP airllm transformers accelerate huggingface-hub
-    success "airllm, transformers, accelerate, huggingface-hub"
-  fi
+  success "llama-cpp-python"
 fi
 
 # =============================================================================

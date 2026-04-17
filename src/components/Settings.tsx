@@ -154,8 +154,7 @@ export default function Settings({
           <RadioGroup
             options={[
               { value: "auto", label: "Auto (detect memory)" },
-              { value: "llamacpp", label: "llama.cpp (GGUF, faster)" },
-              { value: "airllm", label: "AirLLM (low memory)" },
+              { value: "llamacpp", label: "llama.cpp (GGUF)" },
             ]}
             value={draft.backend}
             onChange={(v) => set("backend", v as AppConfig["backend"])}

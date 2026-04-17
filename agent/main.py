@@ -13,7 +13,7 @@ Input message types (from Tauri):
   {"type": "config",           "patch": {...}}
   {"type": "tool_ack",         "id": "...", "decision": "allow"|"deny"}
   {"type": "status_request"}
-  {"type": "load_model",       "model_path": "...", "backend"?: "auto"|"llamacpp"|"airllm"}
+  {"type": "load_model",       "model_path": "...", "backend"?: "auto"|"llamacpp"}
   {"type": "download_catalog"}
   {"type": "download_start",   "model_id": "...", "dest_dir": "...", "hf_token"?: "..."}
   {"type": "download_cancel"}
@@ -222,7 +222,7 @@ async def main() -> None:
     network_enabled = False  # opt-in; user must enable in Settings
 
     # ── Backend + model ───────────────────────────────────────────────────────
-    backend = select_backend(backend_kind, n_ctx=context_size)
+    backend = select_backend(backend_kind, n_ctx=context_size, model_path=model_path)
     emit({"type": "model_status", "backend": backend.name, "loaded": False})
 
     if model_path:
@@ -362,6 +362,11 @@ async def main() -> None:
         elif msg_type == "config":
             patch = msg.get("patch", {})
             _apply_config_patch(patch, orchestrator)
+            if "context_size" in patch:
+                try:
+                    context_size = int(patch["context_size"])
+                except (ValueError, TypeError):
+                    pass
 
         elif msg_type == "status_request":
             emit({
@@ -374,17 +379,30 @@ async def main() -> None:
         elif msg_type == "load_model":
             new_path = os.path.expanduser(msg.get("model_path", ""))
             new_backend_str = msg.get("backend", "")
-            if new_backend_str and new_backend_str != backend_kind.value:
-                # Backend type changed — swap it out
-                backend_kind = BackendKind(new_backend_str)
-                old_backend = backend
-                backend = select_backend(backend_kind, n_ctx=context_size)
+            
+            if new_path:
+                model_path = new_path
+            
+            # If backend is provided, update our state.
+            if new_backend_str:
+                try:
+                    backend_kind = BackendKind(new_backend_str)
+                except ValueError:
+                    log.warning("Invalid backend requested: %s", new_backend_str)
+
+            # Re-evaluate backend selection. We MUST do this if in AUTO mode 
+            # because the model_path itself determines the backend (GGUF vs Dir).
+            old_backend = backend
+            new_backend = select_backend(backend_kind, n_ctx=context_size, model_path=model_path)
+            
+            if new_backend != old_backend:
+                log.info("Switching backend from %s to %s", old_backend.name, new_backend.name)
                 old_backend.unload()
+                backend = new_backend
                 # Re-wire orchestrator and agent tool to new backend
                 orchestrator._backend = backend
                 agent_tool._backend = backend
-            if new_path:
-                model_path = new_path
+            
             asyncio.create_task(_load_model(backend, model_path))
 
         elif msg_type == "download_catalog":
@@ -435,7 +453,10 @@ def _apply_config_patch(patch: dict, orchestrator) -> None:
         orchestrator._params.temperature = float(patch["temperature"])
 
     if "max_new_tokens" in patch:
-        orchestrator._params.max_new_tokens = int(patch["max_new_tokens"])
+        try:
+            orchestrator._params.max_new_tokens = int(patch["max_new_tokens"])
+        except (ValueError, TypeError):
+            pass
 
     if "system_prompt_append" in patch:
         from prompt.system_prompt import build_system_prompt

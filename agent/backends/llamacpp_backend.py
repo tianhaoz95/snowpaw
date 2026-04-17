@@ -65,6 +65,14 @@ class LlamaCppBackend(LLMBackend):
             return True  # returning False aborts the load
 
         def _load() -> None:
+            import os
+            if os.path.isdir(model_path):
+                raise ValueError(
+                    f"Path is a directory: {model_path}. "
+                    "llama.cpp backend requires a single GGUF file. "
+                    "llama.cpp requires a single GGUF file."
+                )
+
             try:
                 import llama_cpp                   # type: ignore[import]
                 import llama_cpp.llama_cpp as lib  # type: ignore[import]

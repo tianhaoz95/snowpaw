@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 
 export interface AppConfig {
   working_directory: string;
-  backend: "auto" | "airllm" | "llamacpp";
+  backend: "auto" | "llamacpp";
   model_path: string;
   context_size: number;
   max_new_tokens: number;

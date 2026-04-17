@@ -2,21 +2,15 @@
 #
 # Install with:  pip install -r requirements.txt
 #
-# Optional heavy deps (install only what you need):
-#   llama.cpp backend:  pip install llama-cpp-python
-#   AirLLM backend:     pip install airllm transformers accelerate
 
 # ── Core (always required) ─────────────────────────────────────────────────────
 # No external deps for the core harness — uses only stdlib (asyncio, json, re, etc.)
 
-# ── LLM backends (at least one required) ──────────────────────────────────────
-# llama.cpp (recommended for most machines):
+# ── LLM backend ───────────────────────────────────────────────────────────────
+# llama.cpp (required):
 #   pip install llama-cpp-python
 #   For GPU acceleration on macOS (Metal):
 #   CMAKE_ARGS="-DLLAMA_METAL=on" pip install llama-cpp-python --force-reinstall --no-cache-dir
-
-# AirLLM (for machines with <8GB RAM):
-#   pip install airllm transformers accelerate huggingface-hub
 
 # ── Memory probing (optional but recommended for auto backend selection) ───────
 psutil>=5.9

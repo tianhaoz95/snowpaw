@@ -38,7 +38,7 @@ export default function Terminal({ onInput, onInterrupt, modelLoaded, writeToTer
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const inputBufferRef = useRef<string>(""");
+  const inputBufferRef = useRef<string>("");
   const historyRef = useRef<string[]>([]);
   const historyIdxRef = useRef<number>(-1);
   const savedInputRef = useRef<string>("");

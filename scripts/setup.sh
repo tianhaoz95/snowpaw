@@ -189,15 +189,29 @@ else
 
   # LLM backend
   if $METAL && [ "$(uname)" = "Darwin" ]; then
-    info "Installing llama-cpp-python with Metal GPU acceleration..."
-    CMAKE_ARGS="-DLLAMA_METAL=on" \
-      "$VENV_PYTHON" -m pip install --quiet --upgrade --force-reinstall --no-cache-dir \
-      llama-cpp-python
+    # Check if llama-cpp-python is already installed with Metal support.
+    # If so, skip the expensive force-reinstall to avoid unnecessary disk usage.
+    METAL_ALREADY_ENABLED=$("$VENV_PYTHON" -c "
+try:
+    from llama_cpp import llama_supports_gpu_offload
+    print('yes' if llama_supports_gpu_offload() else 'no')
+except Exception:
+    print('no')
+" 2>/dev/null)
+    if [ "$METAL_ALREADY_ENABLED" = "yes" ]; then
+      success "llama-cpp-python (Metal already enabled, skipping reinstall)"
+    else
+      info "Installing llama-cpp-python with Metal GPU acceleration..."
+      CMAKE_ARGS="-DLLAMA_METAL=on" \
+        "$VENV_PYTHON" -m pip install --quiet --upgrade --force-reinstall --no-cache-dir \
+        llama-cpp-python
+      success "llama-cpp-python"
+    fi
   else
     info "Installing llama-cpp-python..."
     $PIP llama-cpp-python
+    success "llama-cpp-python"
   fi
-  success "llama-cpp-python"
 fi
 
 # =============================================================================

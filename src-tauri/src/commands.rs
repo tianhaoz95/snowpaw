@@ -8,7 +8,6 @@ use crate::sidecar::write_to_sidecar;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub working_directory: String,
-    pub backend: String,        // "auto" | "llamacpp"
     pub model_path: String,
     pub context_size: u32,
     pub max_new_tokens: u32,
@@ -25,7 +24,6 @@ impl Default for AppConfig {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .into_owned(),
-            backend: "auto".into(),
             model_path: String::new(),
             context_size: 8192,
             max_new_tokens: 2048,

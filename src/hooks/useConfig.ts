@@ -15,7 +15,6 @@ import { useCallback, useEffect, useState } from "react";
 
 export interface AppConfig {
   working_directory: string;
-  backend: "auto" | "llamacpp";
   model_path: string;
   context_size: number;
   max_new_tokens: number;
@@ -27,7 +26,6 @@ export interface AppConfig {
 
 const DEFAULT_CONFIG: AppConfig = {
   working_directory: "~",
-  backend: "auto",
   model_path: "",
   context_size: 8192,
   max_new_tokens: 2048,

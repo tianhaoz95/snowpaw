@@ -144,22 +144,12 @@ export default function Settings({
             onUseModel={(path) => {
               set("model_path", path);
               setShowDownloader(false);
-              onLoadModel(path, draft.backend);
+              onLoadModel(path);
             }}
           />
         )}
 
-        {/* Backend */}
-        <Field label="LLM Backend">
-          <RadioGroup
-            options={[
-              { value: "auto", label: "Auto (detect memory)" },
-              { value: "llamacpp", label: "llama.cpp (GGUF)" },
-            ]}
-            value={draft.backend}
-            onChange={(v) => set("backend", v as AppConfig["backend"])}
-          />
-        </Field>
+
 
         {/* Permission Mode */}
         <Field label="Permission Mode">

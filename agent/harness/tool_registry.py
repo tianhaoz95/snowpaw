@@ -106,6 +106,14 @@ class Tool(abc.ABC):
             f"</tool>"
         )
 
+    def to_json_schema(self) -> dict:
+        """Return a dict representing this tool's JSON schema (Gap 9)."""
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.input_schema,
+        }
+
 
 # ── Registry ──────────────────────────────────────────────────────────────────
 
@@ -140,3 +148,7 @@ class ToolRegistry:
         """Render all tools as a <tools>…</tools> XML block."""
         inner = "\n\n".join(t.to_xml() for t in self._tools.values())
         return f"<tools>\n{inner}\n</tools>"
+
+    def to_json_schema(self) -> list[dict]:
+        """Render all tools as a list of JSON schema objects (Gap 9)."""
+        return [t.to_json_schema() for t in self._tools.values()]

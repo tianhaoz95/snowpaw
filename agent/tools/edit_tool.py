@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from harness.tool_registry import Tool, ToolContext, ToolResult
+from harness.secret_scanner import scan
 from .file_staleness import is_stale, clear_staleness
 from .file_utils import suggest_paths, format_suggestions
 
@@ -52,6 +53,12 @@ class EditTool(Tool):
         path = _resolve(input["file_path"], ctx.working_directory)
         old: str = input["old_string"]
         new: str = input["new_string"]
+
+        # Secret scanning (Gap 10)
+        warning = ""
+        secrets = scan(new)
+        if secrets:
+            warning = "⚠ Possible credential in output: " + ", ".join(secrets) + "\n\n"
 
         if not os.path.isfile(path):
             suggestions = suggest_paths(input["file_path"], ctx.working_directory)
@@ -119,7 +126,7 @@ class EditTool(Tool):
 
         clear_staleness(ctx.session_id, path)
         summary = f"Edited {os.path.basename(path)}"
-        return ToolResult.ok(f"Successfully replaced text in {path}", summary)
+        return ToolResult.ok(f"{warning}Successfully replaced text in {path}", summary)
 
 
 def _resolve(path: str, cwd: str) -> str:

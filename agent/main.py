@@ -3,37 +3,31 @@ CyberPaw Agent — Sidecar Entry Point
 =====================================
 Reads NDJSON commands from stdin, runs the agent harness, and writes
 NDJSON events to stdout.  This process is spawned by Tauri as a sidecar
-and communicates exclusively via stdin/stdout.
+and communicates over a pipe.
 
-Input message types (from Tauri):
-  {"type": "input",            "text": "..."}
-  {"type": "cd",               "path": "..."}
+Protocol (NDJSON)
+-----------------
+Tauri → Agent:
+  {"type": "input", "text": "..."}
+  {"type": "cd", "path": "..."}
   {"type": "reset"}
   {"type": "interrupt"}
-  {"type": "config",           "patch": {...}}
-  {"type": "tool_ack",         "id": "...", "decision": "allow"|"deny"}
+  {"type": "config", "patch": {...}}
+  {"type": "load_model", "model_path": "...", "backend": "auto|llamacpp"}
   {"type": "status_request"}
-  {"type": "load_model",       "model_path": "...", "backend"?: "auto"|"llamacpp"}
-  {"type": "download_catalog"}
-  {"type": "download_start",   "model_id": "...", "dest_dir": "...", "hf_token"?: "..."}
-  {"type": "download_cancel"}
+  {"type": "resume", "session_id": "..."}
+  {"type": "consolidate"}
 
-Output message types (to Tauri → WebView):
-  {"type": "token",              "text": "..."}
-  {"type": "tool_start",         "id": "...", "tool": "...", "input": {...}}
-  {"type": "tool_end",           "id": "...", "tool": "...", "summary": "...", "is_error": bool}
-  {"type": "tool_ask",           "id": "...", "tool": "...", "input": {...}}
-  {"type": "status",             "phase": "idle"|"thinking"|"tool_running", "tool"?: "..."}
-  {"type": "system",             "text": "..."}
-  {"type": "error",              "message": "..."}
-  {"type": "model_progress",     "stage": "loading"|"ready", "pct": int}
-  {"type": "model_status",       "backend": "...", "loaded": bool, "vram_used_mb": int, "model_size_mb": int, "kv_cache_mb": int}
-  {"type": "download_catalog",   "models": [...]}
-  {"type": "download_progress",  "model_id": "...", "pct": int, "downloaded_mb": float,
-                                 "total_mb": float|null, "speed_mbps": float}
-  {"type": "download_done",      "model_id": "...", "path": "..."}
-  {"type": "download_error",     "model_id": "...", "message": "..."}
-  {"type": "download_cancelled", "model_id": "..."}
+Agent → Tauri:
+  {"type": "token", "text": "..."}
+  {"type": "tool_start", "id": "...", "tool": "...", "input": {...}}
+  {"type": "tool_end", "id": "...", "tool": "...", "summary": "...", "is_error": false}
+  {"type": "status", "phase": "idle|thinking|tool_running", "turn": 1, "max_turns": 40}
+  {"type": "generation_stats", "tokens": 0, "elapsed_ms": 0, "tokens_per_sec": 0.0}
+  {"type": "model_progress", "stage": "loading|ready", "pct": 0}
+  {"type": "model_status", "backend": "...", "loaded": true, "vram_used_mb": 0}
+  {"type": "system", "text": "..."}
+  {"type": "error", "message": "..."}
 """
 
 from __future__ import annotations
@@ -43,261 +37,140 @@ import json
 import logging
 import os
 import sys
+import uuid as _uuid
 
-# ── Logging: write to stderr so it doesn't pollute the stdout NDJSON stream ──
-logging.basicConfig(
-    stream=sys.stderr,
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+# Add the current directory to sys.path so we can import from harness/ etc.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from backends.selector import BackendKind, select_backend
+from harness.orchestrator import Orchestrator
+from harness.memory import consolidate_session_memory
+from harness.permissions import PermissionMode
+from harness.tool_registry import ToolRegistry
+from prompt.system_prompt import build_system_prompt
+from tools.read_tool import ReadTool
+from tools.write_tool import WriteTool
+from tools.edit_tool import EditTool
+from tools.multi_edit_tool import MultiEditTool
+from tools.delete_tool import DeleteFileTool
+from tools.move_tool import MoveTool
+from tools.bash_tool import BashTool
+from tools.grep_tool import GrepTool
+from tools.glob_tool import GlobTool
+from tools.list_dir_tool import ListDirTool
+from tools.web_search_tool import WebSearchTool
+from tools.web_fetch_tool import WebFetchTool
+from tools.playwright_tool import PlaywrightTool
+from tools.repl_tool import ReplTool
+from tools.agent_tool import AgentTool
+from tools.task_tools import (
+    TodoWriteTool,
+    TaskCreateTool,
+    TaskGetTool,
+    TaskListTool,
+    TaskUpdateTool,
+    TaskStopTool,
+    TaskOutputTool,
+    reset_task_session,
 )
-log = logging.getLogger("cyberpaw.main")
+from tools.sleep_tool import SleepTool
 
+# ── Logging ──────────────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stderr)],
+)
+log = logging.getLogger("cyberpaw-agent")
+
+
+# ── NDJSON helpers ────────────────────────────────────────────────────────────
 
 def emit(event: dict) -> None:
-    """Write a single NDJSON event to stdout."""
-    line = json.dumps(event, ensure_ascii=False)
-    sys.stdout.write(line + "\n")
+    """Write an NDJSON event to stdout."""
+    sys.stdout.write(json.dumps(event) + "\n")
     sys.stdout.flush()
 
 
-async def _run_shell(command: str, working_directory: str) -> None:
-    """Run *command* in *working_directory*, streaming output as shell_output events."""
+def _model_temperature(path: str) -> float:
+    """Return recommended temperature for the model family."""
+    p = path.lower()
+    if "gemma" in p:
+        return 0.0  # Gemma is best at 0.0 for coding
+    return 0.2      # reasonable default
+
+
+async def _run_shell(command: str, cwd: str) -> None:
+    """Run a shell command and emit the output as a system message."""
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=working_directory,
-            env={**os.environ, "TERM": "dumb"},
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
         )
-        assert proc.stdout is not None
-        while True:
-            chunk = await proc.stdout.read(256)
-            if not chunk:
-                break
-            emit({"type": "shell_output", "text": chunk.decode("utf-8", errors="replace")})
-        exit_code = await proc.wait()
-        emit({"type": "shell_done", "exit_code": exit_code})
-    except Exception as exc:
-        emit({"type": "shell_output", "text": f"Error: {exc}\n"})
-        emit({"type": "shell_done", "exit_code": 1})
+        stdout, stderr = await proc.communicate()
+        out = stdout.decode().strip()
+        err = stderr.decode().strip()
+        if out:
+            emit({"type": "system", "text": out})
+        if err:
+            emit({"type": "system", "text": f"Error: {err}"})
+    except Exception as e:
+        emit({"type": "error", "message": f"Shell error: {e}"})
 
 
-def _model_temperature(path: str) -> float:
-    """Return the recommended sampling temperature for the model at *path*."""
-    name = os.path.basename(path).lower()
-    if "qwen" in name:
-        return 0.7
-    return 1.0
-
-
-async def _load_model(backend, path: str, orchestrator=None) -> None:
-    """Load model at *path* into *backend*, emitting progress events.
-
-    Runs a heartbeat task in parallel that emits a pulse every second so
-    the UI always shows activity even when the backend gives no ticks
-    (e.g. during mmap of a large file before any tensors are loaded).
-    """
-    if not path or not os.path.exists(path):
-        emit({"type": "error", "message": f"Model file not found: {path}"})
-        return
-
-    if backend.is_loaded():
-        backend.unload()
-
-    emit({"type": "model_progress", "stage": "loading", "pct": 0})
-    try:
-        breakdown = getattr(backend, "memory_breakdown_mb", lambda: {})()
-    except Exception:
-        breakdown = {}
-    emit({
-        "type": "model_status",
-        "backend": backend.name,
-        "loaded": False,
-        "vram_used_mb": breakdown.get("total_mb", 0),
-        "model_size_mb": breakdown.get("model_mb", 0),
-        "kv_cache_mb": breakdown.get("kv_mb", 0),
-    })
-
-    last_pct = [0]
-
-    def _on_progress(pct: int) -> None:
-        last_pct[0] = pct
-        emit({"type": "model_progress", "stage": "loading", "pct": pct})
-
-    # Heartbeat: re-emit the last known pct every second so the UI
-    # animates even during silent phases (mmap, GPU transfer).
-    heartbeat_stop = asyncio.Event()
-
-    async def _heartbeat() -> None:
-        while not heartbeat_stop.is_set():
-            await asyncio.sleep(1.0)
-            if not heartbeat_stop.is_set() and last_pct[0] < 100:
-                emit({"type": "model_progress", "stage": "loading",
-                      "pct": last_pct[0], "heartbeat": True})
-
-    heartbeat_task = asyncio.create_task(_heartbeat())
-
-    try:
-        await backend.load(path, _on_progress)
-        if orchestrator is not None:
-            temp = _model_temperature(path)
-            orchestrator._params.temperature = temp
-            emit({"type": "system", "text": f"Set model temperature to {temp}"})
-            log.info("Set temperature to %s for model %s", temp, path)
-
-        emit({"type": "model_progress", "stage": "ready", "pct": 100})
+def _apply_config_patch(patch: dict, orchestrator: Orchestrator) -> None:
+    """Apply config updates from the frontend."""
+    if "permission_mode" in patch:
         try:
-            breakdown = getattr(backend, "memory_breakdown_mb", lambda: {})()
-        except Exception:
-            breakdown = {}
-        emit({
-            "type": "model_status",
-            "backend": backend.name,
-            "loaded": True,
-            "vram_used_mb": breakdown.get("total_mb", 0),
-            "model_size_mb": breakdown.get("model_mb", 0),
-            "kv_cache_mb": breakdown.get("kv_mb", 0),
-        })
-        log.info("Model loaded: %s", path)
-    except Exception as exc:
-        emit({"type": "error", "message": f"Model load failed: {exc}"})
-        log.exception("Model load failed")
-    finally:
-        heartbeat_stop.set()
-        heartbeat_task.cancel()
+            mode = PermissionMode(patch["permission_mode"])
+            orchestrator._permission_mode = mode
+        except ValueError:
+            pass
+
+    if "max_new_tokens" in patch:
+        try:
+            orchestrator._params.max_new_tokens = int(patch["max_new_tokens"])
+        except (ValueError, TypeError):
+            pass
+
+    if "network_enabled" in patch:
+        orchestrator._network_enabled = bool(patch["network_enabled"])
 
 
-async def _install_browsers() -> None:
-    """Run playwright install chromium, emitting progress."""
-    emit({"type": "model_progress", "stage": "loading", "pct": 0, "text": "Installing Chromium..."})
-    try:
-        # Note: In a PyInstaller bundle, we can't easily use sys.executable -m
-        # but we can try to call playwright.cli.main directly in a thread.
-        # However, it uses synchronous blocking calls.
-        # The most reliable way in a bundle is to use the 'playwright' module entry point.
-        import subprocess
-        import re
-        
-        # Heuristic: if we are in a bundle, use the same executable
-        executable = sys.executable
-        cmd = [executable, "-m", "playwright", "install", "chromium"]
-        
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        assert proc.stdout is not None
-        
-        # Regex to match percentage in playwright output (e.g. "  12% ")
-        pct_re = re.compile(r"(\d+)%")
-        
-        while True:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            text = line.decode().strip()
-            if text:
-                # Extract percentage if present, else keep last known or default to 50
-                match = pct_re.search(text)
-                pct = int(match.group(1)) if match else 50
-                # Use a more descriptive text
-                display_text = f"Installing Chromium: {text}"
-                if len(display_text) > 60:
-                    display_text = display_text[:57] + "..."
-                
-                emit({
-                    "type": "model_progress", 
-                    "stage": "loading", 
-                    "pct": pct, 
-                    "text": display_text,
-                    "backend": "Browser"
-                })
-        
-        exit_code = await proc.wait()
-        if exit_code == 0:
-            emit({"type": "model_progress", "stage": "ready", "pct": 100, "text": "Chromium installed."})
-            emit({"type": "system", "text": "Playwright browser (Chromium) installed successfully."})
-        else:
-            emit({"type": "error", "message": f"Browser installation failed (exit {exit_code})."})
-    except Exception as exc:
-        emit({"type": "error", "message": f"Failed to install browser: {exc}"})
-
+# ── Main Event Loop ───────────────────────────────────────────────────────────
 
 async def main() -> None:
-    from backends import BackendKind, select_backend
-    from backends.base import GenerateParams
-    from harness.orchestrator import Orchestrator
-    from harness.permissions import PermissionMode
-    from harness.tool_registry import ToolRegistry
-    from prompt.system_prompt import build_system_prompt
-    from tools import (
-        AgentTool, BashTool, DeleteFileTool, EditTool, GlobTool,
-        GrepTool, ListDirTool, MoveTool, MultiEditTool, ReadTool,
-        ReplTool, SleepTool, WebFetchTool, WebSearchTool, WriteTool,
-        TodoWriteTool, PlaywrightTool,
-        TaskCreateTool, TaskGetTool, TaskListTool,
-        TaskUpdateTool, TaskStopTool, TaskOutputTool,
-        reset_task_session,
-    )
-
-    # ── Session ID (used to key per-session state like REPL namespaces) ──────────
-    import uuid as _uuid
-    session_id = _uuid.uuid4().hex
-
-    # ── Default configuration ─────────────────────────────────────────────────
-    working_directory = os.path.expanduser("~")
-    backend_kind = BackendKind.AUTO
-    model_path = os.environ.get("CYBERPAW_MODEL_PATH", "")
+    # ── Initial State ─────────────────────────────────────────────────────────
+    working_directory = os.getcwd()
     context_size = 8192
-    max_new_tokens = 2048
-    permission_mode = PermissionMode.ASK
-    network_enabled = False  # opt-in; user must enable in Settings
+    model_path = os.environ.get("CYBERPAW_MODEL_PATH")
+    backend_kind = BackendKind.AUTO
 
-    # ── Backend + model ───────────────────────────────────────────────────────
-    backend = select_backend(backend_kind, n_ctx=context_size, model_path=model_path)
-    # Include memory breakdown if backend supports it
-    try:
-        breakdown = getattr(backend, "memory_breakdown_mb", lambda: {})()
-    except Exception:
-        breakdown = {}
-    emit({
-        "type": "model_status",
-        "backend": backend.name,
-        "loaded": False,
-        "vram_used_mb": breakdown.get("total_mb", 0),
-        "model_size_mb": breakdown.get("model_mb", 0),
-        "kv_cache_mb": breakdown.get("kv_mb", 0),
-    })
-
-    if model_path:
-        await _load_model(backend, model_path)
-
-    # ── Tool registry ─────────────────────────────────────────────────────────
+    # ── Tool Setup ────────────────────────────────────────────────────────────
     registry = ToolRegistry()
+    
+    # 1. Base tools
     registry.register(ReadTool())
     registry.register(WriteTool())
     registry.register(EditTool())
     registry.register(MultiEditTool())
-    registry.register(GlobTool())
-    registry.register(GrepTool())
-    registry.register(BashTool())
-    registry.register(ListDirTool())
-    registry.register(MoveTool())
     registry.register(DeleteFileTool())
-    repl_tool = ReplTool()
-    registry.register(repl_tool)
+    registry.register(MoveTool())
+    registry.register(BashTool())
+    registry.register(GrepTool())
+    registry.register(GlobTool())
+    registry.register(ListDirTool())
     registry.register(SleepTool())
-    registry.register(WebFetchTool())
+    
+    # 2. Web tools
     registry.register(WebSearchTool())
+    registry.register(WebFetchTool())
     registry.register(PlaywrightTool())
 
-    # AgentTool needs references to the backend, registry, and emit_fn
-    agent_tool = AgentTool(backend=backend, registry=registry, emit_fn=emit)
-    registry.register(agent_tool)
-
-    # Task & Project Management tools
+    # 3. Task & Project Management tools
     registry.register(TodoWriteTool())
     registry.register(TaskCreateTool())
     registry.register(TaskGetTool())
@@ -306,25 +179,31 @@ async def main() -> None:
     registry.register(TaskStopTool())
     registry.register(TaskOutputTool())
 
-    # ── Orchestrator ──────────────────────────────────────────────────────────
+    # ── Backend Setup ─────────────────────────────────────────────────────────
+    backend = select_backend(backend_kind, n_ctx=context_size, model_path=model_path)
+    
+    # 4. Complex tools (requiring backend/registry access)
+    repl_tool = ReplTool()
+    registry.register(repl_tool)
+    registry.register(AgentTool(backend, registry, emit))
+
+    # ── Session ID (used to key per-session state like REPL namespaces) ──────────
+    session_id = _uuid.uuid4().hex
+
+    # ── Orchestrator Setup ────────────────────────────────────────────────────
     system_prompt = build_system_prompt()
     orchestrator = Orchestrator(
         backend=backend,
         registry=registry,
         system_prompt=system_prompt,
         working_directory=working_directory,
-        permission_mode=permission_mode,
+        permission_mode=PermissionMode.ASK,
         emit_fn=emit,
-        generate_params=GenerateParams(
-            max_new_tokens=max_new_tokens,
-        ),
         context_size=context_size,
         session_id=session_id,
-        network_enabled=network_enabled,
+        network_enabled=False,
     )
 
-    # If a model was pre-loaded via CYBERPAW_MODEL_PATH before the orchestrator
-    # existed, apply the temperature now (load_model path handles the normal case).
     if backend.is_loaded() and model_path:
         orchestrator._params.temperature = _model_temperature(model_path)
 
@@ -347,7 +226,7 @@ async def main() -> None:
         except Exception:
             break
         if not raw:
-            break  # EOF — Tauri closed the pipe
+            break
 
         line = raw.decode("utf-8", errors="replace").strip()
         if not line:
@@ -387,10 +266,22 @@ async def main() -> None:
         elif msg_type == "reset":
             if current_task and not current_task.done():
                 current_task.cancel()
+            
+            # Consolidate memory before resetting (Gap 14)
+            asyncio.create_task(consolidate_session_memory(
+                messages=orchestrator._messages,
+                backend=backend,
+                registry=orchestrator._registry,
+                working_directory=working_directory,
+                permission_mode=orchestrator._permission_mode,
+                emit_fn=emit,
+                session_id=orchestrator._session_id,
+            ))
+
             repl_tool.reset_session(orchestrator._session_id)
             reset_task_session(orchestrator._session_id)
             orchestrator.reset()
-            # Rotate session ID so the new session gets a fresh REPL namespace
+            # Rotate session ID
             session_id = _uuid.uuid4().hex
             orchestrator._session_id = session_id
             emit({"type": "system", "text": "Session reset."})
@@ -400,6 +291,31 @@ async def main() -> None:
             orchestrator.interrupt()
             if current_task and not current_task.done():
                 current_task.cancel()
+
+        elif msg_type == "resume":
+            sess_id = msg.get("session_id")
+            if sess_id:
+                if orchestrator.load_session(sess_id):
+                    repl_tool.reset_session(sess_id)
+                    reset_task_session(sess_id)
+                    session_id = sess_id
+                    emit({"type": "system", "text": f"Resumed session {sess_id}."})
+                else:
+                    emit({"type": "error", "message": f"Could not resume session {sess_id}."})
+            else:
+                emit({"type": "error", "message": "No session_id provided for resume."})
+
+        elif msg_type == "consolidate":
+            asyncio.create_task(consolidate_session_memory(
+                messages=orchestrator._messages,
+                backend=backend,
+                registry=orchestrator._registry,
+                working_directory=working_directory,
+                permission_mode=orchestrator._permission_mode,
+                emit_fn=emit,
+                session_id=orchestrator._session_id,
+            ))
+            emit({"type": "system", "text": "Memory consolidation started in background."})
 
         elif msg_type == "tool_ack":
             request_id = msg.get("id", "")
@@ -432,84 +348,33 @@ async def main() -> None:
         elif msg_type == "load_model":
             new_path = os.path.expanduser(msg.get("model_path", ""))
             new_backend_str = msg.get("backend", "")
-            
             if new_path:
                 model_path = new_path
-            
-            # If backend is provided, update our state.
             if new_backend_str:
                 try:
                     backend_kind = BackendKind(new_backend_str)
                 except ValueError:
                     log.warning("Invalid backend requested: %s", new_backend_str)
 
-            # Re-evaluate backend selection. We MUST do this if in AUTO mode 
-            # because the model_path itself determines the backend (GGUF vs Dir).
+            # Update backend
             old_backend = backend
             new_backend = select_backend(backend_kind, n_ctx=context_size, model_path=model_path)
             
             if new_backend != old_backend:
-                log.info("Switching backend from %s to %s", old_backend.name, new_backend.name)
-                old_backend.unload()
                 backend = new_backend
-                # Re-wire orchestrator and agent tool to new backend
                 orchestrator._backend = backend
-                agent_tool._backend = backend
-            
-            asyncio.create_task(_load_model(backend, model_path, orchestrator))
+                # Re-register tools that need the backend
+                registry.register(AgentTool(backend, registry, emit))
 
-        elif msg_type == "download_catalog":
-            from downloader import get_catalog
-            emit({"type": "download_catalog", "models": get_catalog()})
+            async def _do_load():
+                try:
+                    await backend.load(model_path, lambda p: emit({"type": "model_progress", "pct": p}))
+                    orchestrator._params.temperature = _model_temperature(model_path)
+                    emit({"type": "model_status", "loaded": True, "backend": backend.name})
+                except Exception as e:
+                    emit({"type": "error", "message": f"Failed to load model: {e}"})
 
-        elif msg_type == "download_start":
-            from downloader import start_download
-            model_id = msg.get("model_id", "")
-            dest_dir = os.path.expanduser(
-                msg.get("dest_dir") or os.path.join(os.path.expanduser("~"), "models", "cyberpaw")
-            )
-            hf_token = msg.get("hf_token", "")
-            asyncio.create_task(
-                start_download(model_id, dest_dir, emit, hf_token)
-            )
-
-        elif msg_type == "download_cancel":
-            from downloader import cancel_download
-            cancelled = cancel_download()
-            if not cancelled:
-                emit({"type": "system", "text": "No active download to cancel."})
-
-        elif msg_type == "install_browsers":
-            asyncio.create_task(_install_browsers())
-
-        else:
-            log.debug("Unknown message type: %s", msg_type)
-
-
-def _apply_config_patch(patch: dict, orchestrator) -> None:
-    """Apply non-model config updates from the Settings page.
-    model_path and backend changes are handled by the frontend
-    sending an explicit load_model message instead."""
-    if "working_directory" in patch:
-        path = os.path.expanduser(patch["working_directory"])
-        if os.path.isdir(path):
-            orchestrator.set_working_directory(path)
-
-    if "permission_mode" in patch:
-        from harness.permissions import PermissionMode
-        try:
-            orchestrator._permission_mode = PermissionMode(patch["permission_mode"])
-        except ValueError:
-            pass
-
-    if "max_new_tokens" in patch:
-        try:
-            orchestrator._params.max_new_tokens = int(patch["max_new_tokens"])
-        except (ValueError, TypeError):
-            pass
-
-    if "network_enabled" in patch:
-        orchestrator._network_enabled = bool(patch["network_enabled"])
+            asyncio.create_task(_do_load())
 
 
 if __name__ == "__main__":

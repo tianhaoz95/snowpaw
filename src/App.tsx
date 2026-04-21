@@ -20,6 +20,7 @@ export default function App() {
     modelStatus,
     generationStats,
     agentPhase,
+    turnState,
     writeToTerminal,
     writeTerminal,
     loadModel,
@@ -86,6 +87,7 @@ export default function App() {
     <div className="app">
       <MenuBar
         agentPhase={agentPhase}
+        turnState={turnState}
         modelStatus={modelStatus}
         generationStats={generationStats}
         onOpenFolder={async () => {

@@ -327,13 +327,16 @@ class TaskUpdateTool(Tool):
 class TaskStopTool(Tool):
     name = "TaskStop"
     description = (
-        "Cancel a task.  If the task has an associated running asyncio coroutine "
-        "it will be cancelled; in all cases the task status is set to 'cancelled'."
+        "Cancel a running task or background process. "
+        "Pass either a numeric task ID or a string background task_id like 'bg_a1b2c3d4'. "
+        "Cancels the underlying process or asyncio task and marks status as 'cancelled'."
     )
     input_schema = {
         "type": "object",
         "properties": {
-            "id": {"type": "integer", "description": "Task ID to stop/cancel."},
+            "id": {
+                "description": "Numeric task ID or string background task_id (e.g. 'bg_a1b2c3d4').",
+            },
         },
         "required": ["id"],
     }
@@ -342,7 +345,20 @@ class TaskStopTool(Tool):
         return False
 
     async def call(self, input: dict, ctx: ToolContext) -> ToolResult:
-        tid = int(input["id"])
+        from harness.background_tasks import REGISTRY
+
+        raw_id = input["id"]
+
+        if isinstance(raw_id, str) and raw_id.startswith("bg_"):
+            found = REGISTRY.cancel(raw_id)
+            if not found:
+                return ToolResult.error(f"Background task '{raw_id}' not found or already finished")
+            return ToolResult.ok(f"Background task '{raw_id}' cancelled.", f"Stopped {raw_id}")
+
+        try:
+            tid = int(raw_id)
+        except (ValueError, TypeError):
+            return ToolResult.error(f"Invalid task id: {raw_id!r}")
         found = _STORE.stop(ctx.session_id, tid)
         if not found:
             return ToolResult.error(f"Task #{tid} not found")
@@ -354,14 +370,18 @@ class TaskStopTool(Tool):
 class TaskOutputTool(Tool):
     name = "TaskOutput"
     description = (
-        "Get the current output / result summary for a task.  "
-        "CyberPaw does not run true background workers yet, so this returns "
-        "the task's metadata.  The API is in place for future expansion."
+        "Get the current output / result for a task or background process. "
+        "Pass either a numeric task ID (from TaskCreate) or a string task_id "
+        "like 'bg_a1b2c3d4' returned by Bash/Agent when run_in_background=true. "
+        "For background tasks, status is 'running', 'completed', 'failed', or 'cancelled'. "
+        "Poll until status is no longer 'running' to get the full output."
     )
     input_schema = {
         "type": "object",
         "properties": {
-            "id": {"type": "integer", "description": "Task ID to query."},
+            "id": {
+                "description": "Numeric task ID or string background task_id (e.g. 'bg_a1b2c3d4').",
+            },
         },
         "required": ["id"],
     }
@@ -370,11 +390,40 @@ class TaskOutputTool(Tool):
         return True
 
     async def call(self, input: dict, ctx: ToolContext) -> ToolResult:
-        tid = int(input["id"])
+        from harness.background_tasks import REGISTRY
+
+        raw_id = input["id"]
+
+        # String background task ID (e.g. "bg_a1b2c3d4")
+        if isinstance(raw_id, str) and raw_id.startswith("bg_"):
+            bg = REGISTRY.get(raw_id)
+            if bg is None:
+                return ToolResult.error(f"Background task '{raw_id}' not found")
+            elapsed = f"{bg.elapsed_s():.1f}s"
+            lines = [
+                f"task_id : {bg.task_id}",
+                f"kind    : {bg.kind}",
+                f"label   : {bg.label}",
+                f"status  : {bg.status}",
+                f"elapsed : {elapsed}",
+            ]
+            if bg.exit_code is not None:
+                lines.append(f"exit    : {bg.exit_code}")
+            if bg.output:
+                lines.append(f"\n--- output ---\n{bg.output}")
+            elif bg.status == "running":
+                lines.append("\n(still running — poll again later)")
+            output = "\n".join(lines)
+            return ToolResult.ok(output, f"{raw_id} [{bg.status}] {elapsed}")
+
+        # Numeric task ID from _STORE
+        try:
+            tid = int(raw_id)
+        except (ValueError, TypeError):
+            return ToolResult.error(f"Invalid task id: {raw_id!r}")
         task = _STORE.get(ctx.session_id, tid)
         if task is None:
             return ToolResult.error(f"Task #{tid} not found")
-        # Stub — return task metadata as "output"
         output = _fmt_task(task)
         return ToolResult.ok(output, f"Output for task #{tid}: {task['status']}")
 
@@ -383,7 +432,9 @@ class TaskOutputTool(Tool):
 
 def reset_task_session(session_id: str) -> None:
     """Clear all tasks and cancel running asyncio tasks for a session."""
+    from harness.background_tasks import REGISTRY
     _STORE.reset_session(session_id)
+    REGISTRY.reset()
 
 
 # ── Formatting helper ─────────────────────────────────────────────────────────

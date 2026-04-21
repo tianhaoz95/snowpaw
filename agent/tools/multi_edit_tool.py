@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from harness.tool_registry import Tool, ToolContext, ToolResult
+from harness.secret_scanner import scan
 from .file_staleness import is_stale, clear_staleness
 from .file_utils import suggest_paths, format_suggestions
 
@@ -62,6 +63,17 @@ class MultiEditTool(Tool):
     async def call(self, input: dict, ctx: ToolContext) -> ToolResult:
         path = _resolve(input["file_path"], ctx.working_directory)
         edits: list[dict] = input["edits"]
+
+        # Secret scanning (Gap 10)
+        all_secrets = []
+        for edit in edits:
+            all_secrets.extend(scan(edit["new_string"]))
+        
+        warning = ""
+        if all_secrets:
+            # unique secrets
+            unique_secrets = sorted(list(set(all_secrets)))
+            warning = "⚠ Possible credential in output: " + ", ".join(unique_secrets) + "\n\n"
 
         if not os.path.isfile(path):
             suggestions = suggest_paths(input["file_path"], ctx.working_directory)
@@ -127,7 +139,7 @@ class MultiEditTool(Tool):
 
         clear_staleness(ctx.session_id, path)
         summary = f"Applied {len(edits)} edit(s) to {os.path.basename(path)}"
-        return ToolResult.ok(f"Successfully applied {len(edits)} edit(s) to {path}", summary)
+        return ToolResult.ok(f"{warning}Successfully applied {len(edits)} edit(s) to {path}", summary)
 
 
 def _resolve(path: str, cwd: str) -> str:

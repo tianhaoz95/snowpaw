@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from harness.tool_registry import Tool, ToolContext, ToolResult
+from harness.secret_scanner import scan
 from .file_staleness import clear_staleness
 from .file_utils import suggest_paths, format_suggestions
 
@@ -35,6 +36,12 @@ class WriteTool(Tool):
         path = _resolve(input["file_path"], ctx.working_directory)
         content: str = input["content"]
 
+        # Secret scanning (Gap 10)
+        warning = ""
+        secrets = scan(content)
+        if secrets:
+            warning = "⚠ Possible credential in output: " + ", ".join(secrets) + "\n\n"
+
         parent = os.path.dirname(path)
         if parent and not os.path.isdir(parent):
             parent_rel = os.path.dirname(input["file_path"])
@@ -55,7 +62,7 @@ class WriteTool(Tool):
         clear_staleness(ctx.session_id, path)
         lines = content.count("\n") + 1
         summary = f"Wrote {lines} lines to {os.path.basename(path)}"
-        return ToolResult.ok(f"Successfully wrote {len(content)} bytes to {path}", summary)
+        return ToolResult.ok(f"{warning}Successfully wrote {len(content)} bytes to {path}", summary)
 
 
 def _resolve(path: str, cwd: str) -> str:

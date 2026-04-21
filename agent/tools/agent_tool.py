@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
 
+from harness.background_tasks import REGISTRY, BackgroundTask
 from harness.tool_registry import Tool, ToolContext, ToolResult
 
 if TYPE_CHECKING:
@@ -21,7 +22,8 @@ class AgentTool(Tool):
     working directory and permission mode, and runs to completion before
     returning its final text response as the tool result.
 
-    Mirrors claude-code's AgentTool / InProcessBackend pattern.
+    When run_in_background=true the sub-agent is launched as an asyncio.Task
+    and the tool returns a task_id immediately so the parent can continue.
     """
 
     name = "Agent"
@@ -30,6 +32,8 @@ class AgentTool(Tool):
         "The sub-agent has access to all tools except Agent (no recursive nesting beyond depth 3). "
         "Use this for parallelisable or clearly separable work like exploration, "
         "research, or isolated refactors. "
+        "Set run_in_background=true to launch the sub-agent asynchronously and continue "
+        "working while it runs — retrieve its result later with TaskOutput. "
         "Describe the task clearly — the sub-agent starts with no context from the current conversation."
     )
     input_schema = {
@@ -43,11 +47,22 @@ class AgentTool(Tool):
                 "type": "string",
                 "description": "The full task description for the sub-agent.",
             },
-            "subagent_type": {
+            "mode": {
                 "type": "string",
+                "enum": ["full", "read_only", "web_only"],
                 "description": (
-                    "Optional specialisation hint. "
-                    "Currently unused — all sub-agents use the same model."
+                    "Specialisation mode. "
+                    "'full' (default): access to all tools. "
+                    "'read_only': only Read, Glob, Grep, ListDir. "
+                    "'web_only': only WebSearch, WebFetch, Playwright."
+                ),
+            },
+            "run_in_background": {
+                "type": "boolean",
+                "description": (
+                    "If true, launch the sub-agent asynchronously and return a task_id "
+                    "immediately without waiting for it to finish. "
+                    "Use TaskOutput with that task_id to retrieve the result."
                 ),
             },
         },
@@ -74,11 +89,25 @@ class AgentTool(Tool):
             )
 
         from harness.subagent import run_subagent
-        from harness.permissions import PermissionMode
 
         label: str = input.get("description", "sub-agent")
         prompt: str = input["prompt"]
+        mode: str = input.get("mode", "full")
+        run_in_background: bool = bool(input.get("run_in_background", False))
 
+        # Map mode to tool allowlist
+        tool_filter = None
+        if mode == "read_only":
+            tool_filter = ["Read", "Glob", "Grep", "ListDir"]
+        elif mode == "web_only":
+            tool_filter = ["WebSearch", "WebFetch", "Playwright"]
+
+        if run_in_background:
+            return self._launch_background(
+                prompt, label, tool_filter, ctx
+            )
+
+        # Foreground (blocking) execution
         try:
             result = await run_subagent(
                 task=prompt,
@@ -89,9 +118,57 @@ class AgentTool(Tool):
                 emit_fn=self._emit_fn,
                 depth=ctx.depth + 1,
                 label=label,
+                tool_filter=tool_filter,
             )
         except Exception as e:
             return ToolResult.error(f"Sub-agent failed: {e}")
 
         summary = f"[{label}] completed"
         return ToolResult.ok(result, summary)
+
+    def _launch_background(
+        self,
+        prompt: str,
+        label: str,
+        tool_filter: list[str] | None,
+        ctx: ToolContext,
+    ) -> ToolResult:
+        from harness.subagent import run_subagent
+        import asyncio
+
+        task_id = REGISTRY.new_id()
+        bg = BackgroundTask(task_id=task_id, kind="agent", label=label)
+        REGISTRY.register(bg)
+
+        async def _run() -> None:
+            try:
+                result = await run_subagent(
+                    task=prompt,
+                    backend=self._backend,
+                    registry=self._registry,
+                    working_directory=ctx.working_directory,
+                    permission_mode=ctx.permission_mode,
+                    emit_fn=self._emit_fn,
+                    depth=ctx.depth + 1,
+                    label=label,
+                    tool_filter=tool_filter,
+                )
+                bg.output = result
+                bg.status = "completed"
+            except asyncio.CancelledError:
+                bg.status = "cancelled"
+            except Exception as exc:
+                bg.output = f"Sub-agent error: {exc}"
+                bg.status = "failed"
+            finally:
+                import time
+                bg.ended_at = time.monotonic()
+
+        atask = asyncio.create_task(_run())
+        bg._asyncio_task = atask
+
+        return ToolResult.ok(
+            f"Sub-agent launched in background.\ntask_id: {task_id}\n"
+            f"Use TaskOutput with id={task_id} to retrieve the result when it completes.",
+            f"bg:{task_id} agent — {label[:60]}",
+        )

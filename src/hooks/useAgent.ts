@@ -192,6 +192,7 @@ export interface ModelCatalogEntry {
 
 export function useAgent() {
   const [agentPhase, setAgentPhase] = useState<AgentPhase>("idle");
+  const [turnState, setTurnState] = useState<{ turn: number; maxTurns: number } | null>(null);
   const [modelStatus, setModelStatus] = useState<ModelStatus>({
     backend: "unknown",
     loaded: false,
@@ -265,9 +266,16 @@ export function useAgent() {
           if (phase === "idle" && prev !== "idle") {
             // Agent just finished — emit newline + prompt
             write("\r\n\x1b[38;2;255;45;152m❯\x1b[0m ");
+            setTurnState(null);
           }
           return phase;
         });
+        if (msg.turn && msg.max_turns) {
+          setTurnState({
+            turn: msg.turn as number,
+            maxTurns: msg.max_turns as number,
+          });
+        }
       } else if (type === "system") {
         write(`\x1b[2K\r\x1b[38;2;220;130;220m${msg.text}\x1b[0m\r\n`);
       } else if (type === "error") {
@@ -461,6 +469,7 @@ export function useAgent() {
     modelStatus,
     generationStats,
     agentPhase,
+    turnState,
     loadProgress,
     writeToTerminal: writeToTerminalRef,
     writeTerminal: write,

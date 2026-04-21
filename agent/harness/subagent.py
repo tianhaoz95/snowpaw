@@ -36,6 +36,7 @@ async def run_subagent(
     emit_fn: Callable[[dict], None],
     depth: int,
     label: str,
+    tool_filter: list[str] | None = None,
 ) -> str:
     """
     Run a sub-agent to completion and return its final text response.
@@ -60,8 +61,9 @@ async def run_subagent(
         Current nesting depth (parent's depth + 1).
     label:
         Human-readable label for this sub-agent, e.g. "explore-agent".
-    system_prompt_append:
-        Optional extra text appended to the sub-agent's system prompt.
+    tool_filter:
+        Optional list of tool names that the sub-agent is allowed to use.
+        If None, all tools except 'Agent' are available.
     """
     # Import here to avoid circular dependency at module load time
     from .orchestrator import Orchestrator
@@ -79,8 +81,11 @@ async def run_subagent(
     from .tool_registry import ToolRegistry
     sub_registry = ToolRegistry()
     for tool in registry.all():
-        if tool.name != "Agent":
-            sub_registry.register(tool)
+        if tool.name == "Agent":
+            continue
+        if tool_filter is not None and tool.name not in tool_filter:
+            continue
+        sub_registry.register(tool)
 
     orchestrator = Orchestrator(
         backend=backend,

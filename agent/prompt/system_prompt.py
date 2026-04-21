@@ -24,6 +24,9 @@ tasks: reading code, making edits, running tests, explaining concepts, and
 refactoring.
 
 Operating rules:
+- Before every tool call, write a brief <thought> block explaining your reasoning:
+  <thought>I need to read src/App.tsx to understand how the terminal is initialized.</thought>
+  {"tool": "Read", "input": {...}}
 - Use the Write tool to create new files that do not exist yet.
 - Always read a file before editing an existing one.
 - For existing files, prefer targeted edits (Edit tool) over full rewrites (Write tool).
@@ -44,26 +47,22 @@ You are fully offline. Do not reference external URLs or cloud services.
 _TOOL_INSTRUCTIONS = """\
 ## Tool Use
 
-To call a tool, emit a <tool_use> XML block. The input must be a single-line JSON object.
+To call a tool, emit a JSON object on a single line starting with {"tool": ...}.
 
 Example — reading a file:
-<tool_use>
-<name>Read</name>
-<input>{"file_path": "src/main.py"}</input>
-</tool_use>
+<thought>I'll read the main entry point to see the application structure.</thought>
+{"tool": "Read", "input": {"file_path": "src/main.py"}}
 
 Example — writing a new file:
-<tool_use>
-<name>Write</name>
-<input>{"file_path": "README.md", "content": "# My Project"}</input>
-</tool_use>
+<thought>I'll create a basic README with project instructions.</thought>
+{"tool": "Write", "input": {"file_path": "README.md", "content": "# My Project"}}
 
 Rules:
-- The <input> value must be valid JSON on a single line.
-- After emitting a <tool_use> block, stop generating — the system will run the tool and return its result. You will then continue working.
+- The JSON object must be on a SINGLE line.
+- After emitting a tool call, stop generating — the system will run the tool and return its result. You will then continue working.
 - Tool results arrive in the next message as <tool_result> blocks.
 - Never fabricate tool results. Always wait for the actual result.
-- Use the exact tool names and parameter names listed in <tools> below.
+- Use the exact tool names and parameter names listed in the tool schema below.
 - You may call multiple tools across multiple turns to complete a task. Keep going until the task is done.
 """
 
@@ -97,6 +96,28 @@ def _git_context(cwd: str) -> str:
         )
     except Exception:
         return ""
+
+
+def _find_project_instructions(cwd: str) -> str:
+    """Find and read CLAUDE.md or AGENTS.md in cwd or parents (Gap 6 Phase 2)."""
+    filenames = ["CLAUDE.md", "AGENTS.md"]
+    curr = os.path.abspath(cwd)
+    # Check up to 3 levels up
+    for _ in range(4):
+        for f in filenames:
+            p = os.path.join(curr, f)
+            if os.path.isfile(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as fd:
+                        content = fd.read(2000).strip()
+                        return f"--- {f} ---\n{content}\n--- End of {f} ---"
+                except Exception:
+                    pass
+        parent = os.path.dirname(curr)
+        if parent == curr:
+            break
+        curr = parent
+    return ""
 
 
 def build_system_prompt(
@@ -134,4 +155,9 @@ def build_session_context(
     git = _git_context(working_directory)
     if git:
         parts.append(git)
+    
+    instructions = _find_project_instructions(working_directory)
+    if instructions:
+        parts.append(instructions)
+
     return "\n".join(parts)

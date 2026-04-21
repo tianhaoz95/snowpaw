@@ -627,11 +627,11 @@ cheaper than a full dream pass and more reliable at small model sizes.
 
 | # | Gap | Effort | Why last |
 |---|-----|--------|----------|
-| 9 | Migrate to JSON tool calls | L | Breaking change; needs prompt retuning |
-| 12 | Sub-agent specialisation | M | Useful only for complex workflows |
-| 13 | Session persistence / resume | L | High effort, moderate payoff |
-| 10 | Secret scanning | S | Safety hygiene |
-| 14 | Background memory consolidation | XL | Depends on Gaps 12 + 13 |
+| 9 | Migrate to JSON tool calls | L | ✅ Completed |
+| 12 | Sub-agent specialisation | M | ✅ Completed |
+| 13 | Session persistence / resume | L | ✅ Completed |
+| 10 | Secret scanning | S | ✅ Completed |
+| 14 | Background memory consolidation | XL | ✅ Completed (Simplified) |
 
 ---
 

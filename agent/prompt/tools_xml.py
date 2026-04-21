@@ -16,3 +16,9 @@ if TYPE_CHECKING:
 def render_tools_xml(registry: "ToolRegistry") -> str:
     """Return a <tools>…</tools> block listing all registered tools."""
     return registry.to_xml()
+
+
+def render_tools_json(registry: "ToolRegistry") -> str:
+    """Return a JSON string listing all registered tools (Gap 9)."""
+    import json
+    return json.dumps(registry.to_json_schema(), indent=2)

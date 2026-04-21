@@ -8,7 +8,6 @@ import type { AgentPhase, GenerationStats, ModelStatus } from "../hooks/useAgent
 
 interface Props {
   agentPhase: AgentPhase;
-  turnState: { turn: number; maxTurns: number } | null;
   modelStatus: ModelStatus;
   generationStats: GenerationStats;
   workingDirectory?: string;
@@ -50,7 +49,6 @@ function formatMb(n: number) {
 
 export default function MenuBar({
   agentPhase,
-  turnState,
   modelStatus,
   generationStats,
   workingDirectory,
@@ -153,7 +151,6 @@ export default function MenuBar({
         }}
       >
         ● {PHASE_LABEL[agentPhase]}
-        {turnState && ` (${turnState.turn}/${turnState.maxTurns})`}
       </span>
 
       {/* Model badge */}

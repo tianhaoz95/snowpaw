@@ -20,7 +20,6 @@ export default function App() {
     modelStatus,
     generationStats,
     agentPhase,
-    turnState,
     writeToTerminal,
     writeTerminal,
     loadModel,
@@ -31,7 +30,7 @@ export default function App() {
     downloadProgress,
     downloadedModelPath,
     modelCatalog,
-  } = useAgent();
+  } = useAgent(updateConfig);
 
   const autoLoadedRef = useRef(false);
   const spinnerTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -87,7 +86,7 @@ export default function App() {
     <div className="app">
       <MenuBar
         agentPhase={agentPhase}
-        turnState={turnState}
+
         modelStatus={modelStatus}
         generationStats={generationStats}
         onOpenFolder={async () => {
@@ -113,7 +112,11 @@ export default function App() {
         <Settings
           config={config}
           onSave={(patch) => {
-            updateConfig(patch);
+            // When auto is on, clear any manual value so the sidecar recalculates
+            const effective = { ...patch };
+            if (patch.auto_context) effective.context_size = 0;
+            if (patch.auto_max_tokens) effective.max_new_tokens = 4096;
+            updateConfig(effective);
             // If model_path changed, trigger a load immediately
             if (patch.model_path && patch.model_path !== config.model_path) {
               loadModel(patch.model_path);

@@ -24,8 +24,8 @@ impl Default for AppConfig {
                 .to_string_lossy()
                 .into_owned(),
             model_path: String::new(),
-            context_size: 8192,
-            max_new_tokens: 2048,
+            context_size: 0,
+            max_new_tokens: 4096,
             permission_mode: "ask".into(),
             network_enabled: false,
         }

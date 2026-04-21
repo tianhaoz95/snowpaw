@@ -162,29 +162,53 @@ export default function Settings({
           />
         </Field>
 
-        {/* Context Size */}
-        <Field label={`Context Window: ${draft.context_size} tokens`}>
-          <input
-            type="range"
-            min={2048}
-            max={32768}
-            step={1024}
-            value={draft.context_size}
-            onChange={(e) => set("context_size", Number(e.target.value))}
-            style={{ width: "100%", accentColor: "#ff2d98" }}
+        {/* Context Window */}
+        <Field label="Context Window">
+          <Toggle
+            checked={draft.auto_context}
+            onChange={(v) => set("auto_context", v)}
+            label={draft.auto_context
+              ? `Auto${draft.context_size ? ` — ${draft.context_size.toLocaleString()} tokens` : ""}`
+              : `Manual — ${draft.context_size.toLocaleString()} tokens`}
           />
+          {!draft.auto_context && (
+            <input
+              type="range"
+              min={4096}
+              max={131072}
+              step={4096}
+              value={draft.context_size || 32768}
+              onChange={(e) => set("context_size", Number(e.target.value))}
+              style={{ width: "100%", accentColor: "#ff2d98", marginTop: 6 }}
+            />
+          )}
+          {!draft.auto_context && (
+            <span style={{ color: "#888", fontSize: 11 }}>
+              Requires model reload to take effect.
+            </span>
+          )}
         </Field>
 
         {/* Max New Tokens */}
         <Field label="Max New Tokens">
-          <input
-            type="number"
-            min={256}
-            max={8192}
-            value={draft.max_new_tokens}
-            onChange={(e) => set("max_new_tokens", Number(e.target.value))}
-            style={{ ...inputStyle, width: 100 }}
+          <Toggle
+            checked={draft.auto_max_tokens}
+            onChange={(v) => set("auto_max_tokens", v)}
+            label={draft.auto_max_tokens
+              ? `Auto — ${draft.max_new_tokens.toLocaleString()} tokens`
+              : `Manual — ${draft.max_new_tokens.toLocaleString()} tokens`}
           />
+          {!draft.auto_max_tokens && (
+            <input
+              type="range"
+              min={256}
+              max={8192}
+              step={256}
+              value={draft.max_new_tokens}
+              onChange={(e) => set("max_new_tokens", Number(e.target.value))}
+              style={{ width: "100%", accentColor: "#ff2d98", marginTop: 6 }}
+            />
+          )}
         </Field>
 
 
@@ -232,6 +256,38 @@ export default function Settings({
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
+
+function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}>
+      <div
+        onClick={() => onChange(!checked)}
+        style={{
+          width: 36,
+          height: 20,
+          borderRadius: 10,
+          background: checked ? "#ff2d98" : "#333",
+          position: "relative",
+          flexShrink: 0,
+          transition: "background 0.15s",
+          boxShadow: checked ? "0 0 8px #ff2d9866" : "none",
+        }}
+      >
+        <div style={{
+          position: "absolute",
+          top: 2,
+          left: checked ? 18 : 2,
+          width: 16,
+          height: 16,
+          borderRadius: "50%",
+          background: "#fff",
+          transition: "left 0.15s",
+        }} />
+      </div>
+      <span style={{ color: "#ccc", fontSize: 13 }}>{label}</span>
+    </label>
+  );
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

@@ -18,18 +18,20 @@ export interface AppConfig {
   model_path: string;
   context_size: number;
   max_new_tokens: number;
+  auto_context: boolean;
+  auto_max_tokens: boolean;
   permission_mode: "ask" | "auto_read" | "auto_all";
-
   network_enabled: boolean;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
   working_directory: "~",
   model_path: "",
-  context_size: 8192,
-  max_new_tokens: 2048,
+  context_size: 0,
+  max_new_tokens: 4096,
+  auto_context: true,
+  auto_max_tokens: true,
   permission_mode: "ask",
-
   network_enabled: false,
 };
 

@@ -16,7 +16,7 @@ from typing import AsyncIterator, Callable
 @dataclass
 class GenerateParams:
     """Hyperparameters forwarded to the model on each call."""
-    max_new_tokens: int = 2048
+    max_new_tokens: int = 4096
     temperature: float = 1.0
     top_p: float = 0.95
     repetition_penalty: float = 1.1

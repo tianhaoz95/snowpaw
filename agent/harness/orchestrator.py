@@ -44,7 +44,6 @@ from .tool_registry import ToolContext, ToolRegistry
 
 log = logging.getLogger(__name__)
 
-MAX_TURNS = 40  # hard cap on tool-call iterations per user message
 
 
 class Orchestrator:
@@ -193,25 +192,24 @@ class Orchestrator:
             self._params.stop_sequences = backend_eos
 
         # Prime the KV cache with the static system prefix.
-        # Render a single-turn prompt with an empty user message to get the
-        # header portion, then strip the empty message body so only the
-        # static prefix (BOS + system turn) is cached.
         from harness.message import Message as _Msg
         _primer = render_prompt([_Msg.user("")], self._system_prompt, tools_schema, self._backend)
         await self._backend.prime_cache(_primer)
 
-        for turn in range(MAX_TURNS):
+        # Loop-detection state: track (tool, input_hash, error_summary) tuples.
+        # A "strike" is one repeated failing call; three strikes triggers an intervention.
+        _recent_calls: list[tuple[str, str, str]] = []  # (tool, input_hash, result_summary)
+        _LOOP_WINDOW = 4    # look back this many calls
+        _LOOP_STRIKES = 2   # how many identical failing calls before intervening
+
+        turn = 0
+        while True:
+            turn += 1
             if self._interrupted:
                 self._emit({"type": "token", "text": "\n[interrupted]\n"})
                 break
-            
-            # Emit turn counter (Gap 11)
-            self._emit({
-                "type": "status",
-                "phase": "thinking",
-                "turn": turn + 1,
-                "max_turns": MAX_TURNS,
-            })
+
+            self._emit({"type": "status", "phase": "thinking"})
 
             # Compact if near context limit
             if should_compact(
@@ -255,11 +253,13 @@ class Orchestrator:
                     Message(role="assistant", content=assistant_content)
                 )
 
-            # Detect failed tool calls (Gap 9) — covers both JSON and XML formats
+            # Detect failed tool calls — covers both JSON and XML formats.
+            # Only check the thought-stripped response to avoid false positives
+            # from <tool_use> examples inside <thought> blocks.
             _looks_like_tool_call = (
-                '{"tool":' in response_text
-                or '"tool":' in response_text
-                or '<tool_use>' in response_text.lower()
+                '{"tool":' in clean_response
+                or '"tool":' in clean_response
+                or '<tool_use>' in clean_response.lower()
             )
             if not tool_uses and _looks_like_tool_call:
                 error_msg = (
@@ -269,34 +269,90 @@ class Orchestrator:
                 self._append_message(Message.user(error_msg))
                 self._emit({
                     "type": "token",
-                    "text": f"\n[error: malformed tool call, retrying...]\n",
+                    "text": "\n[error: malformed tool call, retrying...]\n",
                 })
-                # continue to next turn to let the model retry
                 continue
 
             if not tool_uses:
-                if not response_text.strip():
-                    # Backend returned nothing — surface this rather than silently
-                    # ending the turn with no output visible to the user.
-                    self._emit({
-                        "type": "token",
-                        "text": "\n[model returned an empty response — the model may be overloaded or the context window may be full]\n",
-                    })
+                # Only break if the model produced actual visible text — that
+                # means it's genuinely done. If the response is empty or was
+                # entirely <thought> blocks (stripped away), treat it as a
+                # stalled generation and retry rather than halting the task.
+                visible_text = clean_response.strip()
+                if not visible_text:
+                    if not response_text.strip():
+                        self._emit({
+                            "type": "token",
+                            "text": "\n[model returned an empty response — retrying...]\n",
+                        })
+                    else:
+                        # Response had only <thought> content — model is thinking
+                        # but didn't emit a tool call or final answer. Nudge it.
+                        self._emit({
+                            "type": "token",
+                            "text": "\n[model produced only internal thoughts — nudging...]\n",
+                        })
+                    self._append_message(Message.user(
+                        "Please continue. Either call a tool to make progress, "
+                        "or write your final answer if the task is complete."
+                    ))
+                    continue
                 break
 
             # Execute tool calls and collect results
             result_blocks = await self._execute_tool_uses(tool_uses)
+
+            # ── Loop detection ────────────────────────────────────────────────
+            # Record (tool, input_hash, is_error, result_prefix) for each call.
+            # If the same failing (tool, input) pair repeats >= _LOOP_STRIKES times
+            # in the last _LOOP_WINDOW entries, inject an intervention message.
+            from collections import Counter
+            for tu, rb in zip(tool_uses, result_blocks):
+                input_hash = str(sorted(tu.input.items()))[:120]
+                _recent_calls.append((tu.name, input_hash, rb.is_error, rb.content[:120]))
+
+            if len(_recent_calls) > _LOOP_WINDOW * 2:
+                _recent_calls = _recent_calls[-_LOOP_WINDOW * 2:]
+
+            window = _recent_calls[-_LOOP_WINDOW:]
+            # Only count failing calls (is_error=True) for loop detection
+            failing_sigs = Counter(
+                (t, i) for t, i, is_err, _ in window if is_err
+            )
+            if failing_sigs:
+                most_common_sig, count = failing_sigs.most_common(1)[0]
+                if count >= _LOOP_STRIKES:
+                    loop_tool, _ = most_common_sig
+                    loop_error = next(
+                        r for t, i, is_err, r in window
+                        if (t, i) == most_common_sig and is_err
+                    )
+                    intervention = (
+                        f"You have called {loop_tool} with the same input {count} times "
+                        f"and received the same error each time:\n  {loop_error}\n\n"
+                        "This approach is not working. You MUST try something different:\n"
+                        "- If a file edit keeps failing, Read the file first to see its actual current content.\n"
+                        "- If a shell command keeps failing, read the full error output and try a different approach.\n"
+                        "- If you are genuinely stuck, stop and explain to the user what you have tried "
+                        "and what is blocking you.\n"
+                        "Do NOT repeat the same failing call again."
+                    )
+                    result_blocks.append(ToolResultBlock(
+                        tool_use_id=f"loop_intervention_{turn}",
+                        content=intervention,
+                        is_error=True,
+                    ))
+                    self._emit({
+                        "type": "system",
+                        "text": f"[loop detected: {loop_tool} failed {count}x in a row — intervening]",
+                    })
+                    _recent_calls.clear()
 
             # Append tool results as a user message
             self._append_message(
                 Message(role="user", content=result_blocks)
             )
 
-        else:
-            self._emit({
-                "type": "system",
-                "text": f"[reached maximum turn limit of {MAX_TURNS}]",
-            })
 
     async def _stream_llm(self, prompt: str) -> str:
         """Stream tokens from the LLM and emit them; return full response."""
@@ -329,7 +385,7 @@ class Orchestrator:
                     # Pick whichever suppression trigger comes first
                     candidates = [
                         (thought_idx, "<thought>",  "</thought>"),
-                        (json_idx,    '{"tool":',   None),        # ends at newline
+                        (json_idx,    '{"tool":',   None),        # ends at closing brace + newline
                         (xml_idx,     "<tool_use>", "</tool_use>"),
                     ]
                     best = min(
@@ -345,7 +401,6 @@ class Orchestrator:
                             self._emit({"type": "token", "text": _strip_stop(pre, self._params.stop_sequences)})
                         buffer = buffer[found_idx:]
                         in_suppressed_block = True
-                        # Store which close tag we're waiting for
                         _close_tag = close_tag
                     elif len(buffer) > _TAIL * 2:
                         safe = buffer[:-_TAIL]
@@ -366,13 +421,33 @@ class Orchestrator:
                             found_end_idx = end
                             tag_len = len(_close_tag)
                     else:
-                        # JSON {"tool": — ends at first newline after the opening brace
-                        if '{"tool":' in buffer:
-                            idx = buffer.find('{"tool":')
-                            eol = buffer.find("\n", idx)
-                            if eol != -1:
-                                found_end_idx = eol
-                                tag_len = 1
+                        # JSON {"tool": — find the closing brace of the outermost object.
+                        # We track brace depth to handle multi-line JSON correctly.
+                        start = buffer.find('{"tool":')
+                        if start != -1:
+                            depth = 0
+                            in_str = False
+                            escape_next = False
+                            for ci, ch in enumerate(buffer[start:], start):
+                                if escape_next:
+                                    escape_next = False
+                                    continue
+                                if ch == "\\" and in_str:
+                                    escape_next = True
+                                    continue
+                                if ch == '"':
+                                    in_str = not in_str
+                                    continue
+                                if in_str:
+                                    continue
+                                if ch == "{":
+                                    depth += 1
+                                elif ch == "}":
+                                    depth -= 1
+                                    if depth == 0:
+                                        found_end_idx = ci
+                                        tag_len = 1  # consume the closing brace itself
+                                        break
 
                     if found_end_idx != -1:
                         in_suppressed_block = False
@@ -381,8 +456,9 @@ class Orchestrator:
                     else:
                         break  # Still in suppressed block, wait for next token
 
-        # Flush remaining buffer.
-        if buffer and not in_suppressed_block:
+        # Flush remaining buffer — always emit, even if we ended mid-suppressed-block.
+        # Discarding it would make the response look empty and cause a premature halt.
+        if buffer:
             self._emit({"type": "token", "text": _strip_stop(buffer, self._params.stop_sequences)})
 
         full = _strip_stop(full, self._params.stop_sequences)
@@ -523,24 +599,67 @@ def _parse_tool_uses(text: str) -> list[ToolUseBlock]:
             results.append(ToolUseBlock(name=name, input=input_data))
             seen_ids.add(call_id)
 
-    # 1. Primary JSON format
-    # We look for lines starting with {"tool": or {"name":
+    # 1. Primary: single-line JSON  {"tool": ...} or {"name": ...}
     for line in text.splitlines():
         line = line.strip()
         if line.startswith('{"tool":') or line.startswith('{"name":'):
             try:
                 data = json.loads(line)
-                # support both "tool" and "name" keys for robustness
                 name = data.get("tool") or data.get("name")
-                # support both nested "input" and flat keys
                 input_data = data.get("input") if "input" in data else {k: v for k, v in data.items() if k not in ["tool", "name"]}
                 if name and isinstance(input_data, dict):
                     add_result(name, input_data)
             except json.JSONDecodeError:
                 log.debug("JSON parse failed for line: %s", line[:120])
 
-    # 2. Fallback: XML (deprecated but kept for transition/robustness)
-    # Regex to extract <tool_use> blocks from streamed LLM output.
+    # 2. Multi-line JSON — brace-depth scan for {"tool": ... } spanning lines.
+    # Handles models that pretty-print their tool calls.
+    search_start = 0
+    while True:
+        idx = text.find('{"tool":', search_start)
+        if idx == -1:
+            idx = text.find('{"name":', search_start)
+        if idx == -1:
+            break
+        depth = 0
+        in_str = False
+        escape_next = False
+        end_idx = -1
+        for ci, ch in enumerate(text[idx:], idx):
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\" and in_str:
+                escape_next = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end_idx = ci
+                    break
+        if end_idx != -1:
+            candidate = text[idx:end_idx + 1]
+            if "\n" in candidate:  # only needed for multi-line; single-line already handled above
+                try:
+                    data = json.loads(candidate)
+                    name = data.get("tool") or data.get("name")
+                    input_data = data.get("input") if "input" in data else {k: v for k, v in data.items() if k not in ["tool", "name"]}
+                    if name and isinstance(input_data, dict):
+                        add_result(name, input_data)
+                except json.JSONDecodeError:
+                    pass
+            search_start = end_idx + 1
+        else:
+            break
+
+    # 3. Fallback: XML  <tool_use>...</tool_use>
     xml_re = re.compile(
         r"<tool_use>.*?<name>(.*?)</name>.*?<input>(.*?)</input>.*?(?:</tool_use>|$)",
         re.DOTALL | re.IGNORECASE,

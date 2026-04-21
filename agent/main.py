@@ -22,7 +22,7 @@ Agent → Tauri:
   {"type": "token", "text": "..."}
   {"type": "tool_start", "id": "...", "tool": "...", "input": {...}}
   {"type": "tool_end", "id": "...", "tool": "...", "summary": "...", "is_error": false}
-  {"type": "status", "phase": "idle|thinking|tool_running", "turn": 1, "max_turns": 40}
+  {"type": "status", "phase": "idle|thinking|tool_running"}
   {"type": "generation_stats", "tokens": 0, "elapsed_ms": 0, "tokens_per_sec": 0.0}
   {"type": "model_progress", "stage": "loading|ready", "pct": 0}
   {"type": "model_status", "backend": "...", "loaded": true, "vram_used_mb": 0}
@@ -42,7 +42,8 @@ import uuid as _uuid
 # Add the current directory to sys.path so we can import from harness/ etc.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from backends.selector import BackendKind, select_backend
+from backends.selector import BackendKind, calculate_context_size, calculate_max_new_tokens, select_backend, _total_ram_gb
+from downloader import cancel_download, get_catalog, start_download
 from harness.orchestrator import Orchestrator
 from harness.memory import consolidate_session_memory
 from harness.permissions import PermissionMode
@@ -145,9 +146,10 @@ def _apply_config_patch(patch: dict, orchestrator: Orchestrator) -> None:
 async def main() -> None:
     # ── Initial State ─────────────────────────────────────────────────────────
     working_directory = os.getcwd()
-    context_size = 8192
-    model_path = os.environ.get("CYBERPAW_MODEL_PATH")
+    model_path = os.environ.get("CYBERPAW_MODEL_PATH") or ""
     backend_kind = BackendKind.AUTO
+    # 0 → auto-calculate from available RAM when the backend is created
+    context_size = 0
 
     # ── Tool Setup ────────────────────────────────────────────────────────────
     registry = ToolRegistry()
@@ -181,7 +183,9 @@ async def main() -> None:
 
     # ── Backend Setup ─────────────────────────────────────────────────────────
     backend = select_backend(backend_kind, n_ctx=context_size, model_path=model_path)
-    
+    # Resolve the actual context size chosen (may have been auto-calculated)
+    context_size = backend.context_size() or backend._n_ctx
+
     # 4. Complex tools (requiring backend/registry access)
     repl_tool = ReplTool()
     registry.register(repl_tool)
@@ -203,6 +207,7 @@ async def main() -> None:
         session_id=session_id,
         network_enabled=False,
     )
+    orchestrator._params.max_new_tokens = calculate_max_new_tokens(context_size)
 
     if backend.is_loaded() and model_path:
         orchestrator._params.temperature = _model_temperature(model_path)
@@ -327,7 +332,9 @@ async def main() -> None:
             _apply_config_patch(patch, orchestrator)
             if "context_size" in patch:
                 try:
-                    context_size = int(patch["context_size"])
+                    v = int(patch["context_size"])
+                    # 0 means "auto" — recalculate from RAM
+                    context_size = calculate_context_size(_total_ram_gb(), model_path) if v == 0 else v
                 except (ValueError, TypeError):
                     pass
 
@@ -356,25 +363,76 @@ async def main() -> None:
                 except ValueError:
                     log.warning("Invalid backend requested: %s", new_backend_str)
 
-            # Update backend
+            # Recalculate context size for the new model path (0 = auto)
+            # Only recalculate if the user hasn't pinned a specific value via config.
+            if context_size == 0 or not msg.get("keep_ctx"):
+                context_size = calculate_context_size(_total_ram_gb(), model_path)
+
+            # Update backend with the freshly calculated context size
             old_backend = backend
             new_backend = select_backend(backend_kind, n_ctx=context_size, model_path=model_path)
-            
+
             if new_backend != old_backend:
                 backend = new_backend
                 orchestrator._backend = backend
-                # Re-register tools that need the backend
                 registry.register(AgentTool(backend, registry, emit))
+
+            orchestrator._context_size = context_size
+            orchestrator._params.max_new_tokens = calculate_max_new_tokens(context_size)
 
             async def _do_load():
                 try:
                     await backend.load(model_path, lambda p: emit({"type": "model_progress", "pct": p}))
                     orchestrator._params.temperature = _model_temperature(model_path)
-                    emit({"type": "model_status", "loaded": True, "backend": backend.name})
+                    emit({
+                        "type": "model_status",
+                        "loaded": True,
+                        "backend": backend.name,
+                        "context_size": context_size,
+                        "max_new_tokens": orchestrator._params.max_new_tokens,
+                    })
                 except Exception as e:
                     emit({"type": "error", "message": f"Failed to load model: {e}"})
 
             asyncio.create_task(_do_load())
+
+        elif msg_type == "download_catalog":
+            catalog = get_catalog()
+            emit({"type": "download_catalog", "models": catalog})
+
+        elif msg_type == "download_start":
+            dl_model_id = msg.get("model_id", "")
+            dl_dest_dir = os.path.expanduser(
+                msg.get("dest_dir") or os.path.join(os.path.expanduser("~"), "CyberPaw", "models")
+            )
+            dl_hf_token = msg.get("hf_token", "")
+            if dl_model_id:
+                asyncio.create_task(start_download(dl_model_id, dl_dest_dir, emit, dl_hf_token))
+            else:
+                emit({"type": "download_error", "model_id": "", "message": "No model_id provided."})
+
+        elif msg_type == "download_cancel":
+            cancel_download()
+
+        elif msg_type == "install_browsers":
+            async def _install_browsers():
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "playwright", "install", "chromium",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.STDOUT,
+                    )
+                    stdout, _ = await proc.communicate()
+                    out = stdout.decode("utf-8", errors="replace").strip()
+                    if proc.returncode == 0:
+                        emit({"type": "system", "text": f"Browser installed.\n{out}"})
+                    else:
+                        emit({"type": "error", "message": f"Browser install failed:\n{out}"})
+                except FileNotFoundError:
+                    emit({"type": "error", "message": "playwright CLI not found. Run: pip install playwright"})
+                except Exception as e:
+                    emit({"type": "error", "message": f"Browser install error: {e}"})
+            asyncio.create_task(_install_browsers())
 
 
 if __name__ == "__main__":

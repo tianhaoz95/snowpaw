@@ -190,9 +190,8 @@ export interface ModelCatalogEntry {
   requires_hf_token: boolean;
 }
 
-export function useAgent() {
+export function useAgent(onConfigUpdate?: (patch: Partial<import("./useConfig").AppConfig>) => void) {
   const [agentPhase, setAgentPhase] = useState<AgentPhase>("idle");
-  const [turnState, setTurnState] = useState<{ turn: number; maxTurns: number } | null>(null);
   const [modelStatus, setModelStatus] = useState<ModelStatus>({
     backend: "unknown",
     loaded: false,
@@ -264,18 +263,10 @@ export function useAgent() {
         const phase = (msg.phase as AgentPhase) ?? "idle";
         setAgentPhase((prev) => {
           if (phase === "idle" && prev !== "idle") {
-            // Agent just finished — emit newline + prompt
             write("\r\n\x1b[38;2;255;45;152m❯\x1b[0m ");
-            setTurnState(null);
           }
           return phase;
         });
-        if (msg.turn && msg.max_turns) {
-          setTurnState({
-            turn: msg.turn as number,
-            maxTurns: msg.max_turns as number,
-          });
-        }
       } else if (type === "system") {
         write(`\x1b[2K\r\x1b[38;2;220;130;220m${msg.text}\x1b[0m\r\n`);
       } else if (type === "error") {
@@ -304,6 +295,14 @@ export function useAgent() {
           modelSizeMb: (msg.model_size_mb as number) ?? 0,
           kvCacheMb: (msg.kv_cache_mb as number) ?? 0,
         });
+        // Sync auto-calculated values back to the UI config, but only for
+        // fields where auto is still enabled — don't overwrite manual overrides.
+        if (onConfigUpdate) {
+          const patch: Partial<import("./useConfig").AppConfig> = {};
+          if (msg.context_size) patch.context_size = msg.context_size as number;
+          if (msg.max_new_tokens) patch.max_new_tokens = msg.max_new_tokens as number;
+          if (Object.keys(patch).length > 0) onConfigUpdate(patch);
+        }
       } else if (type === "generation_stats") {
         setGenerationStats((prev) => ({
           totalTokens: prev.totalTokens + ((msg.tokens as number) ?? 0),
@@ -469,7 +468,6 @@ export function useAgent() {
     modelStatus,
     generationStats,
     agentPhase,
-    turnState,
     loadProgress,
     writeToTerminal: writeToTerminalRef,
     writeTerminal: write,

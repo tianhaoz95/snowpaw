@@ -41,8 +41,10 @@ def _truncate(output: str) -> str:
 class BashTool(Tool):
     name = "Bash"
     description = (
-        "Execute a shell command in the working directory. "
-        "Output (stdout + stderr) is returned. "
+        "Execute a shell command. "
+        "Each call runs in a fresh shell — 'cd' does not persist between calls. "
+        "To run a command inside a subdirectory use the working_dir parameter "
+        "instead of composing 'cd subdir && command'. "
         "For long-running commands set run_in_background=true to get a task ID "
         "immediately and check results later with TaskOutput. "
         "Commands that take longer than 15 seconds are automatically backgrounded."
@@ -53,6 +55,14 @@ class BashTool(Tool):
             "command": {
                 "type": "string",
                 "description": "Shell command to execute.",
+            },
+            "working_dir": {
+                "type": "string",
+                "description": (
+                    "Directory to run the command in. Can be absolute or relative "
+                    "to the current working directory. Use this instead of 'cd dir && command' "
+                    "since cd does not persist between Bash calls."
+                ),
             },
             "timeout": {
                 "type": "integer",
@@ -84,20 +94,30 @@ class BashTool(Tool):
         run_in_background: bool = bool(input.get("run_in_background", False))
         label: str = input.get("description") or f"$ {command[:60]}"
 
+        # Resolve working_dir — absolute wins, relative is joined to ctx.working_directory
+        raw_wd = input.get("working_dir", "")
+        if raw_wd:
+            wd = raw_wd if os.path.isabs(raw_wd) else os.path.join(ctx.working_directory, raw_wd)
+            wd = os.path.normpath(wd)
+            if not os.path.isdir(wd):
+                return ToolResult.error(f"working_dir not found: {wd}")
+        else:
+            wd = ctx.working_directory
+
         # Safety check
         for blocked in BLOCKED_COMMANDS:
             if blocked in command:
                 return ToolResult.error(f"Blocked command pattern: {blocked!r}")
 
         if run_in_background:
-            return await self._launch_background(command, label, ctx)
+            return await self._launch_background(command, label, ctx, wd)
 
-        return await self._run_foreground(command, label, timeout, ctx)
+        return await self._run_foreground(command, label, timeout, ctx, wd)
 
     # ── Explicit background launch ────────────────────────────────────────────
 
     async def _launch_background(
-        self, command: str, label: str, ctx: ToolContext
+        self, command: str, label: str, ctx: ToolContext, wd: str
     ) -> ToolResult:
         task_id = REGISTRY.new_id()
         bg = BackgroundTask(task_id=task_id, kind="bash", label=label)
@@ -109,7 +129,7 @@ class BashTool(Tool):
                     command,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
-                    cwd=ctx.working_directory,
+                    cwd=wd,
                     env={**os.environ, "TERM": "dumb"},
                 )
                 bg._process = proc
@@ -139,14 +159,14 @@ class BashTool(Tool):
     # ── Foreground with auto-background at 15 s ───────────────────────────────
 
     async def _run_foreground(
-        self, command: str, label: str, timeout: int, ctx: ToolContext
+        self, command: str, label: str, timeout: int, ctx: ToolContext, wd: str
     ) -> ToolResult:
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                cwd=ctx.working_directory,
+                cwd=wd,
                 env={**os.environ, "TERM": "dumb"},
             )
         except Exception as e:
@@ -166,7 +186,7 @@ class BashTool(Tool):
                 )
             except asyncio.TimeoutError:
                 # Still running — promote to background
-                return await self._promote_to_background(proc, command, label, timeout, ctx)
+                return await self._promote_to_background(proc, command, label, timeout, ctx, wd)
         else:
             # Non-auto-bg commands: block up to the full timeout
             try:
@@ -187,6 +207,7 @@ class BashTool(Tool):
         label: str,
         timeout: int,
         ctx: ToolContext,
+        wd: str,
     ) -> ToolResult:
         task_id = REGISTRY.new_id()
         bg = BackgroundTask(task_id=task_id, kind="bash", label=label, _process=proc)

@@ -6,11 +6,6 @@ on:
     paths:
       - 'src-tauri/tauri.conf.json'
   workflow_dispatch:
-    inputs:
-      force_build:
-        description: 'Force build even if version unchanged'
-        type: boolean
-        default: true
 
 permissions:
   contents: write   # required to create releases and upload assets
@@ -39,7 +34,7 @@ jobs:
           echo "Previous version: $PREVIOUS"
           echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
 
-          # Always build on workflow_dispatch (force_build=true by default)
+          # Always build on workflow_dispatch so manual re-runs work
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           elif [ "$CURRENT" != "$PREVIOUS" ]; then
@@ -153,23 +148,27 @@ jobs:
           gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
           git push --delete origin "$TAG" 2>/dev/null || true
 
+          # Write release notes to a file to avoid shell quoting issues
+          cat > /tmp/release-notes.md << 'NOTES_EOF'
+          ## CyberPaw VERSION_PLACEHOLDER
+
+          ### Installation
+          1. Download the `.dmg` file below
+          2. Open the DMG and drag **CyberPaw.app** to your Applications folder
+          3. Right-click the app and choose **Open** on first launch (app is unsigned)
+
+          > **Note:** This build is unsigned. macOS Gatekeeper will warn on first launch.
+          > Right-click → Open to bypass it.
+          NOTES_EOF
+          sed -i '' "s/VERSION_PLACEHOLDER/${VERSION}/" /tmp/release-notes.md
+
           # Build file list
           FILES=()
           [ -f "$DMG" ] && FILES+=("$DMG")
           [ -f "$ZIP" ] && FILES+=("$ZIP")
 
-          NOTES="## CyberPaw v${VERSION}
-
-### Installation
-1. Download \`CyberPaw_${VERSION}_aarch64.dmg\`
-2. Open the DMG and drag **CyberPaw.app** to your Applications folder
-3. Right-click → Open on first launch (app is unsigned)
-
-> **Note:** This build is unsigned. macOS will show a security warning
-> on first launch — right-click the app and choose **Open** to bypass it."
-
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --title "CyberPaw v${VERSION}" \
-            --notes "$NOTES" \
+            --notes-file /tmp/release-notes.md \
             "${FILES[@]}"

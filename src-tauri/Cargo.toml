@@ -1,6 +1,6 @@
 [package]
 name = "cyberpaw"
-version = "0.2.0"
+version = "0.3.0"
 description = "CyberPaw — local coding agent"
 authors = []
 license = ""

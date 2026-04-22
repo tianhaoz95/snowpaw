@@ -99,23 +99,51 @@ jobs:
           # Disable code signing — distributing as unsigned for now.
           TAURI_SIGNING_PRIVATE_KEY: ""
 
+      # ── Ad-hoc code signing ───────────────────────────────────────────────
+      # Without ANY signature, macOS Gatekeeper marks the app as "damaged"
+      # when it's downloaded from the internet (quarantine xattr triggers a
+      # signature check that fails on completely unsigned binaries).
+      # Ad-hoc signing (-s -) doesn't require an Apple Developer account but
+      # satisfies the "has a signature" requirement, so Gatekeeper shows the
+      # normal "unidentified developer" prompt instead of "damaged".
+      - name: Ad-hoc sign the app bundle
+        run: |
+          APP_DIR=$(find src-tauri/target/release/bundle/macos -name "*.app" -maxdepth 1 | head -1)
+
+          # Sign all nested executables and dylibs first (deep signing order matters)
+          find "$APP_DIR" -type f \( -name "*.dylib" -o -name "*.so" -o -perm +111 \) | while read -r bin; do
+            codesign --force --sign - --timestamp=none "$bin" 2>/dev/null || true
+          done
+
+          # Sign the top-level app bundle
+          codesign --force --deep --sign - --timestamp=none \
+            --options runtime \
+            "$APP_DIR"
+
+          echo "Signed: $APP_DIR"
+          codesign --verify --verbose "$APP_DIR" && echo "Signature valid"
+
       # ── Collect artefacts ─────────────────────────────────────────────────
       - name: Locate build artefacts
         id: artefacts
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
 
-          DMG=$(find src-tauri/target/release/bundle/dmg -name "*.dmg" | head -1)
           APP_DIR=$(find src-tauri/target/release/bundle/macos -name "*.app" -maxdepth 1 | head -1)
+
+          # Re-create the DMG after signing (Tauri's DMG was built before signing)
+          DMG_DIR="src-tauri/target/release/bundle/dmg"
+          DMG="${DMG_DIR}/CyberPaw_${VERSION}_aarch64.dmg"
+          mkdir -p "$DMG_DIR"
+          hdiutil create -volname "CyberPaw" -srcfolder "$APP_DIR" \
+            -ov -format UDZO "$DMG"
 
           echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
 
           # Create a zipped .app for users who prefer drag-to-Applications
-          if [ -d "$APP_DIR" ]; then
-            ZIP="src-tauri/target/release/bundle/macos/CyberPaw-${VERSION}-macos.zip"
-            ditto -c -k --keepParent "$APP_DIR" "$ZIP"
-            echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
-          fi
+          ZIP="src-tauri/target/release/bundle/macos/CyberPaw-${VERSION}-macos.zip"
+          ditto -c -k --keepParent "$APP_DIR" "$ZIP"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
 
       - name: Upload DMG artefact
         uses: actions/upload-artifact@v4
@@ -153,12 +181,14 @@ jobs:
           ## CyberPaw VERSION_PLACEHOLDER
 
           ### Installation
-          1. Download the `.dmg` file below
+          1. Download `CyberPaw_VERSION_PLACEHOLDER_aarch64.dmg`
           2. Open the DMG and drag **CyberPaw.app** to your Applications folder
-          3. Right-click the app and choose **Open** on first launch (app is unsigned)
+          3. On first launch macOS may show an "unidentified developer" warning —
+             open **System Settings → Privacy & Security** and click **Open Anyway**
 
-          > **Note:** This build is unsigned. macOS Gatekeeper will warn on first launch.
-          > Right-click → Open to bypass it.
+          > **Note:** This build is ad-hoc signed (not notarized). macOS Gatekeeper
+          > will show a one-time warning on first launch which you can dismiss via
+          > System Settings → Privacy & Security → Open Anyway.
           NOTES_EOF
           sed -i '' "s/VERSION_PLACEHOLDER/${VERSION}/" /tmp/release-notes.md
 

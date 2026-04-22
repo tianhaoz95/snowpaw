@@ -100,6 +100,15 @@ class Orchestrator:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
+    async def prime_kv_cache(self) -> None:
+        """KV cache priming is disabled — it corrupts llama.cpp state when the
+        incremental eval of the real prompt delta fails (llama_decode -3).
+        llama-cpp-python resets the cache automatically on each generate() call,
+        so priming would only save time on the very first turn and is not worth
+        the risk of breaking all subsequent inference.
+        """
+        return
+
     def interrupt(self) -> None:
         """Signal the running loop to stop after the current tool completes."""
         self._interrupted = True
@@ -190,11 +199,6 @@ class Orchestrator:
         backend_eos = self._backend.eos_strings()
         if backend_eos:
             self._params.stop_sequences = backend_eos
-
-        # Prime the KV cache with the static system prefix.
-        from harness.message import Message as _Msg
-        _primer = render_prompt([_Msg.user("")], self._system_prompt, tools_schema, self._backend)
-        await self._backend.prime_cache(_primer)
 
         # Loop-detection state: track (tool, input_hash, error_summary) tuples.
         # A "strike" is one repeated failing call; three strikes triggers an intervention.
@@ -344,7 +348,7 @@ class Orchestrator:
                     ))
                     self._emit({
                         "type": "system",
-                        "text": f"[loop detected: {loop_tool} failed {count}x in a row — intervening]",
+                        "text": f"[{loop_tool} failed {count}x with the same input — nudging the agent to try a different approach]",
                     })
                     _recent_calls.clear()
 
@@ -461,7 +465,9 @@ class Orchestrator:
         if buffer:
             self._emit({"type": "token", "text": _strip_stop(buffer, self._params.stop_sequences)})
 
-        full = _strip_stop(full, self._params.stop_sequences)
+        if token_count == 0:
+            log.warning("_stream_llm: model yielded zero tokens (stop_seqs=%r)", self._params.stop_sequences)
+        full = _truncate_at_stop(full, self._params.stop_sequences)
 
         elapsed = time.monotonic() - t_start
         tps = token_count / elapsed if elapsed > 0 else 0.0
@@ -576,6 +582,48 @@ class Orchestrator:
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+def _repair_json(s: str) -> str:
+    # Fix invalid JSON escape sequences produced by small models writing code.
+    # JSON only allows a small set of backslash escapes; models writing Dart/JS
+    # often emit \$ \{ \} \( etc. which are invalid and break json.loads.
+    # We double any backslash that is not followed by a valid JSON escape char.
+    _VALID_SIMPLE = set('"\\/ bfnrt')  # single-char escapes
+    out: list[str] = []
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == '\\' and i + 1 < len(s):
+            nxt = s[i + 1]
+            if nxt in _VALID_SIMPLE:
+                out.append(ch)
+                out.append(nxt)
+                i += 2
+            elif nxt == 'u' and i + 5 < len(s) and all(c in '0123456789abcdefABCDEF' for c in s[i+2:i+6]):
+                # Valid \uXXXX unicode escape
+                out.append(s[i:i+6])
+                i += 6
+            else:
+                # Invalid escape: double the backslash, leave nxt for next iteration
+                out.append('\\\\')
+                i += 1
+        else:
+            out.append(ch)
+            i += 1
+    return ''.join(out)
+
+
+def _try_parse_json(s: str) -> "dict | None":
+    """Try json.loads, then retry with _repair_json on failure."""
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        pass
+    try:
+        return json.loads(_repair_json(s))
+    except json.JSONDecodeError:
+        return None
+
+
 def _parse_tool_uses(text: str) -> list[ToolUseBlock]:
     """
     Extract all tool calls from LLM output, with fallbacks for fragile
@@ -603,13 +651,13 @@ def _parse_tool_uses(text: str) -> list[ToolUseBlock]:
     for line in text.splitlines():
         line = line.strip()
         if line.startswith('{"tool":') or line.startswith('{"name":'):
-            try:
-                data = json.loads(line)
+            data = _try_parse_json(line)
+            if data is not None:
                 name = data.get("tool") or data.get("name")
                 input_data = data.get("input") if "input" in data else {k: v for k, v in data.items() if k not in ["tool", "name"]}
                 if name and isinstance(input_data, dict):
                     add_result(name, input_data)
-            except json.JSONDecodeError:
+            else:
                 log.debug("JSON parse failed for line: %s", line[:120])
 
     # 2. Multi-line JSON — brace-depth scan for {"tool": ... } spanning lines.
@@ -647,14 +695,12 @@ def _parse_tool_uses(text: str) -> list[ToolUseBlock]:
         if end_idx != -1:
             candidate = text[idx:end_idx + 1]
             if "\n" in candidate:  # only needed for multi-line; single-line already handled above
-                try:
-                    data = json.loads(candidate)
+                data = _try_parse_json(candidate)
+                if data is not None:
                     name = data.get("tool") or data.get("name")
                     input_data = data.get("input") if "input" in data else {k: v for k, v in data.items() if k not in ["tool", "name"]}
                     if name and isinstance(input_data, dict):
                         add_result(name, input_data)
-                except json.JSONDecodeError:
-                    pass
             search_start = end_idx + 1
         else:
             break
@@ -692,19 +738,27 @@ def _strip_thoughts(text: str) -> str:
     return re.sub(r"<thought>.*?</thought>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
 
 
-def _strip_stop(text: str, stop_sequences: list[str]) -> str:
+def _truncate_at_stop(text: str, stop_sequences: list[str]) -> str:
     """
-    Remove any stop sequence that appears at the tail of *text*.
+    Truncate *text* at the first occurrence of any stop sequence.
 
-    llama-cpp-python (and some other backends) include the matched stop string
-    in the last yielded token.  Stripping it here prevents chat-template tokens
-    like <end_of_turn> or </start_of_turn> from leaking into the displayed
-    output or being passed to _parse_tool_uses.
+    llama-cpp-python sometimes includes the matched stop token in the final
+    yielded chunk.  Truncating here prevents it from appearing in the response
+    or being mistaken for empty output.
     """
+    earliest = len(text)
+    for seq in stop_sequences:
+        idx = text.find(seq)
+        if idx != -1 and idx < earliest:
+            earliest = idx
+    return text[:earliest].rstrip() if earliest < len(text) else text
+
+
+def _strip_stop(text: str, stop_sequences: list[str]) -> str:
+    """Remove a stop sequence that appears at the tail of *text* (for mid-stream chunks)."""
     for seq in stop_sequences:
         if text.endswith(seq):
             return text[: -len(seq)]
-        # Also strip if the stop token is followed only by whitespace/newlines
         stripped = text.rstrip()
         if stripped.endswith(seq):
             return stripped[: -len(seq)]

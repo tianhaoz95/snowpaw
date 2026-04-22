@@ -400,9 +400,9 @@ export function useAgent(onConfigUpdate?: (patch: Partial<import("./useConfig").
     setGenerationStats({ totalTokens: 0, tokensPerSec: 0 });
   }, [write]);
 
-  const setWorkingDirectory = useCallback(async (path: string) => {
+  const setWorkingDirectory = useCallback(async (path: string, silent = false) => {
     await invoke("set_working_directory", { path }).catch(() => {});
-    write(`\x1b[33mOpened: ${path}\x1b[0m\r\n`);
+    if (!silent) write(`\x1b[33mOpened: ${path}\x1b[0m\r\n`);
   }, [write]);
 
   const resolvePermission = useCallback(
@@ -481,5 +481,14 @@ export function useAgent(onConfigUpdate?: (patch: Partial<import("./useConfig").
     downloadProgress,
     downloadedModelPath,
     modelCatalog,
+    checkInstalledModels: async (dir: string): Promise<Set<string>> => {
+      try {
+        const { readDir } = await import("@tauri-apps/plugin-fs");
+        const entries = await readDir(dir);
+        return new Set(entries.map((e) => e.name).filter(Boolean));
+      } catch {
+        return new Set<string>();
+      }
+    },
   };
 }

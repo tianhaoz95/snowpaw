@@ -122,6 +122,12 @@ class LlamaCppBackend(LLMBackend):
         self._llm = None
         log.info("llama.cpp model unloaded")
 
+    def reset_kv_cache(self) -> None:
+        """Clear the KV cache so prime_cache can be called again."""
+        if self._llm is not None:
+            self._llm.reset()  # sets n_tokens = 0
+            log.debug("KV cache cleared")
+
     # ── Inference ─────────────────────────────────────────────────────────────
 
     async def generate(
@@ -177,41 +183,81 @@ class LlamaCppBackend(LLMBackend):
         return self._llm.metadata.get("tokenizer.chat_template")
 
     def eos_strings(self) -> list[str]:
-        """Derive EOS stop strings from the GGUF vocabulary metadata."""
+        """Derive EOS/end-of-turn stop strings from the GGUF vocabulary metadata.
+
+        Reads all token-ID keys that signal end-of-generation (eos, eot, eom)
+        so models with multiple stop tokens stop correctly.
+        """
         if self._llm is None:
             return []
         meta = self._llm.metadata
-        eos_id_str = meta.get("tokenizer.ggml.eos_token_id")
-        if eos_id_str is None:
-            return []
-        try:
-            eos_id = int(eos_id_str)
-            raw_tokens = meta.get("tokenizer.ggml.tokens")
-            if isinstance(raw_tokens, str):
-                import json as _json
+
+        raw_tokens = meta.get("tokenizer.ggml.tokens")
+        if isinstance(raw_tokens, str):
+            import json as _json
+            try:
                 raw_tokens = _json.loads(raw_tokens)
-            if isinstance(raw_tokens, list) and eos_id < len(raw_tokens):
-                return [raw_tokens[eos_id]]
-        except (ValueError, IndexError, TypeError, Exception):
-            log.debug("Could not derive EOS string from GGUF metadata")
-        return []
+            except Exception:
+                raw_tokens = None
+
+        def _token_str(id_key: str) -> str | None:
+            id_str = meta.get(id_key)
+            if id_str is None:
+                return None
+            try:
+                tid = int(id_str)
+                if isinstance(raw_tokens, list) and tid < len(raw_tokens):
+                    return raw_tokens[tid]
+            except (ValueError, IndexError, TypeError):
+                pass
+            return None
+
+        results: list[str] = []
+        seen: set[str] = set()
+
+        # Collect all end-of-generation token IDs defined in the GGUF spec.
+        # eot = end-of-turn (Qwen: <|im_end|>), eos = end-of-sequence,
+        # eom = end-of-message (some Llama 3 variants).
+        for key in (
+            "tokenizer.ggml.eos_token_id",
+            "tokenizer.ggml.eot_token_id",
+            "tokenizer.ggml.eom_token_id",
+        ):
+            tok = _token_str(key)
+            if tok and tok not in seen:
+                results.append(tok)
+                seen.add(tok)
+
+        if not results:
+            log.debug("Could not derive EOS strings from GGUF metadata")
+        return results
 
     async def prime_cache(self, system_prefix: str) -> None:
-        """Warm the KV cache with the stable system prompt prefix."""
+        """
+        Warm the KV cache with the full system+tools prefix.
+
+        Must only be called when n_tokens == 0 (immediately after model load).
+        eval() appends tokens at the current n_tokens position, so calling
+        this mid-conversation would corrupt the KV cache by appending the
+        system prefix on top of existing conversation history.
+
+        After this call, generate() will find n_tokens > 0, detect the common
+        prefix with any new prompt, and only evaluate the delta tokens.
+        """
         if self._llm is None:
             return
-        
-        # This evaluates the system_prefix and stores it in the KV cache
-        # so that subsequent calls starting with this prefix are faster.
-        # We use eval() directly to fill the cache without generating tokens.
+        if self._llm.n_tokens > 0:
+            # Already primed or mid-conversation — do not corrupt the cache.
+            log.debug("prime_cache: n_tokens=%d, skipping", self._llm.n_tokens)
+            return
+
         def _prime():
             try:
                 tokens = self._llm.tokenize(system_prefix.encode())
-                # eval() expects a sequence of token IDs
                 self._llm.eval(tokens)
-                log.info("llama.cpp KV cache primed with %d tokens", len(tokens))
+                log.info("KV cache primed with %d tokens", len(tokens))
             except Exception as e:
-                log.warning("Failed to prime llama.cpp KV cache: %s", e)
+                log.warning("Failed to prime KV cache: %s", e)
 
         await asyncio.to_thread(_prime)
 

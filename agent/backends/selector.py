@@ -32,16 +32,16 @@ _RAM_UTILISATION = 0.75
 _KV_BYTES_PER_TOKEN_KNOWN: dict[str, int] = {
     "gemma-4-e2b": 106_496,
     "gemma-4-e4b": 139_264,
-    "qwen2.5-coder-3b": 36_864,
-    "qwen2.5-coder-7b": 57_344,
-    "qwen2.5-3b": 36_864,
-    "qwen2.5-7b": 57_344,
 }
 _KV_BYTES_PER_TOKEN_DEFAULT = 80_000  # conservative fallback
 
 # Hard bounds
 _CTX_MIN = 4_096
-_CTX_MAX = 131_072   # 128k — llama.cpp hard cap for most models
+# 65536 (64k) is the practical upper limit for llama-cpp-python 0.3.x on
+# Apple Silicon / CPU-only hosts. Attempting n_ctx=131072 causes
+# llama_decode to return -3 (internal batch/KV allocation failure) even
+# for short prompts, making the model completely non-functional.
+_CTX_MAX = 65_536
 
 
 class BackendKind(str, Enum):

@@ -65,24 +65,6 @@ MODEL_CATALOG: list[ModelEntry] = [
         size_gb=4.6,
         quant="Q4_K_M",
     ),
-    ModelEntry(
-        id="qwen2.5-coder-3b-q4km",
-        name="Qwen 2.5 Coder 3B (Q4_K_M)",
-        description="3B · 2.0 GB · Strong code quality · Good for 8 GB RAM machines",
-        url="https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf",
-        filename="qwen2.5-coder-3b-instruct-q4_k_m.gguf",
-        size_gb=2.0,
-        quant="Q4_K_M",
-    ),
-    ModelEntry(
-        id="qwen2.5-coder-7b-q4km",
-        name="Qwen 2.5 Coder 7B (Q4_K_M)",
-        description="7B · 4.4 GB · Excellent code quality · Needs 8+ GB RAM",
-        url="https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
-        filename="qwen2.5-coder-7b-instruct-q4_k_m.gguf",
-        size_gb=4.4,
-        quant="Q4_K_M",
-    ),
 ]
 
 

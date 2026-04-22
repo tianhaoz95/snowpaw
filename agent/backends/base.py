@@ -120,6 +120,10 @@ class LLMBackend(abc.ABC):
         """
         pass
 
+    def reset_kv_cache(self) -> None:
+        """Clear the KV cache. Default implementation does nothing."""
+        pass
+
     # ── Diagnostics ───────────────────────────────────────────────────────────
 
     def vram_used_mb(self) -> int:

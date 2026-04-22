@@ -3,8 +3,10 @@
  * Cyberpunk black + pink theme.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DownloadProgress, ModelCatalogEntry } from "../hooks/useAgent";
+
+const DEFAULT_DEST = "~/CyberPaw/models";
 
 interface Props {
   catalog: ModelCatalogEntry[];
@@ -14,6 +16,7 @@ interface Props {
   onStart: (modelId: string, destDir?: string, hfToken?: string) => void;
   onCancel: () => void;
   onUseModel: (path: string) => void;
+  onCheckInstalled: (dir: string) => Promise<Set<string>>;
 }
 
 export default function ModelDownloader({
@@ -24,11 +27,14 @@ export default function ModelDownloader({
   onStart,
   onCancel,
   onUseModel,
+  onCheckInstalled,
 }: Props) {
   const [selected, setSelected] = useState<string>("");
   const [destDir, setDestDir] = useState("");
   const [hfToken, setHfToken] = useState("");
   const [showToken, setShowToken] = useState(false);
+  const [installedFilenames, setInstalledFilenames] = useState<Set<string>>(new Set());
+  const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (catalog.length === 0) onFetchCatalog();
@@ -38,8 +44,40 @@ export default function ModelDownloader({
     if (catalog.length > 0 && !selected) setSelected(catalog[0].id);
   }, [catalog, selected]);
 
+  // Scan the destination directory for already-downloaded model files.
+  const scanInstalled = (dir: string) => {
+    const resolved = dir.trim() || DEFAULT_DEST;
+    const expand = resolved.startsWith("~")
+      ? import("@tauri-apps/api/path").then(({ homeDir }) => homeDir()).then((home) => resolved.replace("~", home))
+      : Promise.resolve(resolved);
+    expand.then((expanded) => onCheckInstalled(expanded)).then(setInstalledFilenames);
+  };
+
+  // Scan on mount and whenever destDir changes (debounced).
+  useEffect(() => {
+    scanInstalled(destDir);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (scanTimerRef.current) clearTimeout(scanTimerRef.current);
+    scanTimerRef.current = setTimeout(() => scanInstalled(destDir), 300);
+    return () => {
+      if (scanTimerRef.current) clearTimeout(scanTimerRef.current);
+    };
+  }, [destDir]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-scan after a download completes so the row flips to "Installed".
+  useEffect(() => {
+    if (downloadedPath) scanInstalled(destDir);
+  }, [downloadedPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const isDownloading = progress !== null;
   const selectedEntry = catalog.find((m) => m.id === selected);
+
+  const resolvedPath = (entry: ModelCatalogEntry) => {
+    const dir = (destDir.trim() || DEFAULT_DEST).replace(/\/$/, "");
+    return `${dir}/${entry.filename}`;
+  };
 
   return (
     <div
@@ -62,7 +100,7 @@ export default function ModelDownloader({
           textShadow: "0 0 8px #ff2d9866",
         }}
       >
-        Download a Model
+        Models
       </div>
 
       {catalog.length === 0 ? (
@@ -74,56 +112,79 @@ export default function ModelDownloader({
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {catalog.map((m) => (
-            <label
-              key={m.id}
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 10,
-                cursor: "pointer",
-                padding: "8px 10px",
-                borderRadius: 6,
-                border: `1px solid ${selected === m.id ? "#ff2d9866" : "#2a002a"}`,
-                background: selected === m.id ? "#ff2d9811" : "transparent",
-                boxShadow: selected === m.id ? "0 0 8px #ff2d9822" : "none",
-                transition: "all 0.15s",
-              }}
-            >
-              <input
-                type="radio"
-                value={m.id}
-                checked={selected === m.id}
-                onChange={() => setSelected(m.id)}
-                style={{ marginTop: 2, flexShrink: 0, accentColor: "#ff2d98" }}
-                disabled={isDownloading}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: "#ffffff", fontSize: 13, fontWeight: 500 }}>
-                  {m.name}
+          {catalog.map((m) => {
+            const installed = installedFilenames.has(m.filename);
+            const isSelected = selected === m.id;
+            return (
+              <label
+                key={m.id}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  cursor: "pointer",
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  border: `1px solid ${isSelected ? (installed ? "#00ff9966" : "#ff2d9866") : "#2a002a"}`,
+                  background: isSelected ? (installed ? "#00ff9911" : "#ff2d9811") : "transparent",
+                  boxShadow: isSelected ? `0 0 8px ${installed ? "#00ff9922" : "#ff2d9822"}` : "none",
+                  transition: "all 0.15s",
+                }}
+              >
+                <input
+                  type="radio"
+                  value={m.id}
+                  checked={isSelected}
+                  onChange={() => setSelected(m.id)}
+                  style={{ marginTop: 2, flexShrink: 0, accentColor: installed ? "#00ff99" : "#ff2d98" }}
+                  disabled={isDownloading}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: "#ffffff", fontSize: 13, fontWeight: 500 }}>
+                    {m.name}
+                  </div>
+                  <div style={{ color: "#aaaaaa", fontSize: 11, marginTop: 2 }}>
+                    {m.description}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                    <Tag>{m.quant}</Tag>
+                    <Tag>{m.size_gb} GB</Tag>
+                    {m.requires_hf_token && <Tag color="#ff2d98">HF token required</Tag>}
+                    {installed && <Tag color="#00ff99">✓ Installed</Tag>}
+                  </div>
                 </div>
-                <div style={{ color: "#ffffff", fontSize: 11, marginTop: 2 }}>
-                  {m.description}
-                </div>
-                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                  <Tag>{m.quant}</Tag>
-                  <Tag>{m.size_gb} GB</Tag>
-                  {m.requires_hf_token && <Tag color="#ff2d98">HF token required</Tag>}
-                </div>
-              </div>
-            </label>
-          ))}
+                {installed && (
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onUseModel(resolvedPath(m));
+                    }}
+                    disabled={isDownloading}
+                    style={{
+                      ...smallBtnStyle,
+                      alignSelf: "center",
+                      borderColor: "#00ff99",
+                      color: "#00ff99",
+                      opacity: isDownloading ? 0.4 : 1,
+                    }}
+                  >
+                    Load
+                  </button>
+                )}
+              </label>
+            );
+          })}
         </div>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <label style={{ color: "#ffffff", fontSize: 11 }}>
-          Save to (leave blank for ~/models/cyberpaw/)
+          Save to (leave blank for {DEFAULT_DEST}/)
         </label>
         <input
           value={destDir}
           onChange={(e) => setDestDir(e.target.value)}
-          placeholder="~/models/cyberpaw"
+          placeholder={DEFAULT_DEST}
           disabled={isDownloading}
           style={inputStyle}
         />
@@ -152,38 +213,6 @@ export default function ModelDownloader({
 
       {isDownloading && progress && <ProgressBar progress={progress} />}
 
-      {downloadedPath && !isDownloading && (
-        <div
-          style={{
-            background: "#ff2d9811",
-            border: "1px solid #ff2d9866",
-            borderRadius: 6,
-            padding: "8px 12px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 8,
-            boxShadow: "0 0 10px #ff2d9833",
-          }}
-        >
-          <span style={{ color: "#ff2d98", fontSize: 12, textShadow: "0 0 6px #ff2d9866" }}>
-            ✓ Downloaded successfully
-          </span>
-          <button
-            onClick={() => onUseModel(downloadedPath)}
-            style={{
-              ...smallBtnStyle,
-              background: "#ff2d9822",
-              borderColor: "#ff2d98",
-              color: "#ff2d98",
-              fontWeight: 600,
-            }}
-          >
-            Use this model
-          </button>
-        </div>
-      )}
-
       <div style={{ display: "flex", gap: 8 }}>
         {isDownloading ? (
           <button onClick={onCancel} style={dangerBtnStyle}>
@@ -194,11 +223,11 @@ export default function ModelDownloader({
             onClick={() =>
               selected && onStart(selected, destDir || undefined, hfToken || undefined)
             }
-            disabled={!selected || catalog.length === 0}
+            disabled={!selected || catalog.length === 0 || (selectedEntry != null && installedFilenames.has(selectedEntry.filename))}
             style={{
               ...primaryBtnStyle,
-              opacity: !selected || catalog.length === 0 ? 0.4 : 1,
-              cursor: !selected || catalog.length === 0 ? "not-allowed" : "pointer",
+              opacity: (!selected || catalog.length === 0 || (selectedEntry != null && installedFilenames.has(selectedEntry.filename))) ? 0.4 : 1,
+              cursor: (!selected || catalog.length === 0 || (selectedEntry != null && installedFilenames.has(selectedEntry.filename))) ? "not-allowed" : "pointer",
             }}
           >
             Download

@@ -6,7 +6,7 @@ import os
 
 from harness.tool_registry import Tool, ToolContext, ToolResult
 from harness.secret_scanner import scan
-from .file_staleness import clear_staleness, record_read
+from .file_staleness import clear_staleness, record_write
 from .file_utils import suggest_paths, format_suggestions
 
 
@@ -59,9 +59,9 @@ class WriteTool(Tool):
         except OSError as e:
             return ToolResult.error(str(e))
 
-        # Record mtime so subsequent Edit calls have a valid staleness baseline
+        # Mark as written-but-not-yet-read so Edit is blocked until Read confirms content
         clear_staleness(ctx.session_id, path)
-        record_read(ctx.session_id, path)
+        record_write(ctx.session_id, path)
         lines = content.count("\n") + 1
         summary = f"Wrote {lines} lines to {os.path.basename(path)}"
         return ToolResult.ok(f"{warning}Successfully wrote {len(content)} bytes to {path}", summary)

@@ -20,6 +20,7 @@ interface Props {
   onStartDownload: (modelId: string, destDir?: string, hfToken?: string) => void;
   onCancelDownload: () => void;
   onLoadModel: (modelPath: string) => void;
+  onCheckInstalled: (dir: string) => Promise<Set<string>>;
 }
 
 export default function Settings({
@@ -33,20 +34,12 @@ export default function Settings({
   onStartDownload,
   onCancelDownload,
   onLoadModel,
+  onCheckInstalled,
 }: Props) {
   const [draft, setDraft] = useState<AppConfig>({ ...config });
-  const [showDownloader, setShowDownloader] = useState(!config.model_path);
 
   const set = <K extends keyof AppConfig>(key: K, value: AppConfig[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
-
-  const pickModelPath = async () => {
-    const selected = await openDialog({
-      multiple: false,
-      filters: [{ name: "Model", extensions: ["gguf", "bin", "safetensors"] }],
-    });
-    if (typeof selected === "string") set("model_path", selected);
-  };
 
   const pickWorkingDir = async () => {
     const selected = await openDialog({ directory: true, multiple: false });
@@ -106,48 +99,37 @@ export default function Settings({
           </div>
         </Field>
 
-        {/* Model Path */}
-        <Field label="Model Path (.gguf or HF dir)">
-          <div style={{ display: "flex", gap: 6 }}>
-            <input
-              value={draft.model_path}
-              onChange={(e) => set("model_path", e.target.value)}
-              placeholder="e.g. ~/models/gemma-4-e4b.gguf"
-              style={inputStyle}
-            />
-            <button onClick={pickModelPath} style={btnStyle}>Browse</button>
-          </div>
-          <button
-            onClick={() => setShowDownloader((v) => !v)}
-            style={{
-              ...btnStyle,
-              marginTop: 4,
-              color: "#cc00ff",
-              borderColor: "#cc00ff44",
-              fontSize: 11,
-            }}
-          >
-            {showDownloader ? "▲ Hide downloader" : "▼ Download a model…"}
-          </button>
-        </Field>
-
-        {showDownloader && (
-          <ModelDownloader
-            catalog={modelCatalog}
-            progress={downloadProgress}
-            downloadedPath={downloadedModelPath}
-            onFetchCatalog={onFetchCatalog}
-            onStart={onStartDownload}
-            onCancel={onCancelDownload}
-            onUseModel={(path) => {
-              set("model_path", path);
-              setShowDownloader(false);
-              onLoadModel(path);
-            }}
-          />
+        {/* Active model */}
+        {draft.model_path && (
+          <Field label="Active Model">
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ ...inputStyle, flex: 1, color: "#aaa", fontSize: 11, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {draft.model_path.split(/[/\\]/).pop()}
+              </span>
+              <button
+                onClick={() => set("model_path", "")}
+                style={{ ...btnStyle, borderColor: "#ff5555", color: "#ff5555" }}
+              >
+                Clear
+              </button>
+            </div>
+          </Field>
         )}
 
-
+        <ModelDownloader
+          catalog={modelCatalog}
+          progress={downloadProgress}
+          downloadedPath={downloadedModelPath}
+          onFetchCatalog={onFetchCatalog}
+          onStart={onStartDownload}
+          onCancel={onCancelDownload}
+          onCheckInstalled={onCheckInstalled}
+          onUseModel={(path) => {
+            set("model_path", path);
+            onLoadModel(path);
+            onClose();
+          }}
+        />
 
         {/* Permission Mode */}
         <Field label="Permission Mode">

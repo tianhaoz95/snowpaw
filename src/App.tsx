@@ -30,6 +30,7 @@ export default function App() {
     downloadProgress,
     downloadedModelPath,
     modelCatalog,
+    checkInstalledModels,
   } = useAgent(updateConfig);
 
   const autoLoadedRef = useRef(false);
@@ -51,31 +52,35 @@ export default function App() {
     autoLoadedRef.current = true;
 
     // Small delay so Terminal has mounted and writeToTerminal.current is set.
-    setTimeout(() => {
-      // Restore last-used workspace before loading the model
+    setTimeout(async () => {
+      const P = "\x1b[38;2;255;45;152m";
+      const R = "\x1b[0m";
+
+      // 1. Working directory
+      const wd = (config.working_directory && config.working_directory !== "~")
+        ? config.working_directory
+        : "~";
+      writeTerminal(`Working directory: ${wd}\r\n`);
       if (config.working_directory && config.working_directory !== "~") {
-        setWorkingDirectory(config.working_directory);
+        await setWorkingDirectory(config.working_directory, true);
       }
 
+      // 2. Loading spinner / no-model message
       if (config.model_path) {
         const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let i = 0;
-        const P = "\x1b[38;2;255;45;152m";
-        const R = "\x1b[0m";
         const modelName = config.model_path.split(/[/\\]/).pop();
-        
-        // Initial line — NO newline, the spinner will stay on this line via \r
+
         writeTerminal(`${P}${frames[0]}${R} Loading ${modelName}…`);
         spinnerTimerRef.current = setInterval(() => {
           i = (i + 1) % frames.length;
-          // \r moves to start of line, rewrite in place
           writeTerminal(`\r${P}${frames[i]}${R} Loading ${modelName}…`);
         }, 80);
         loadModel(config.model_path);
       } else {
         writeTerminal(
           "\x1b[2mNo model loaded — open Settings to load one.\x1b[0m\r\n"
-          + "\x1b[38;2;255;45;152m❯\x1b[0m "
+          + `${P}❯${R} `
         );
       }
     }, 50);
@@ -112,15 +117,10 @@ export default function App() {
         <Settings
           config={config}
           onSave={(patch) => {
-            // When auto is on, clear any manual value so the sidecar recalculates
             const effective = { ...patch };
             if (patch.auto_context) effective.context_size = 0;
             if (patch.auto_max_tokens) effective.max_new_tokens = 4096;
             updateConfig(effective);
-            // If model_path changed, trigger a load immediately
-            if (patch.model_path && patch.model_path !== config.model_path) {
-              loadModel(patch.model_path);
-            }
             setSettingsOpen(false);
           }}
           onClose={() => setSettingsOpen(false)}
@@ -130,6 +130,7 @@ export default function App() {
           onFetchCatalog={fetchCatalog}
           onStartDownload={startDownload}
           onCancelDownload={cancelDownload}
+          onCheckInstalled={checkInstalledModels}
           onLoadModel={(path) => {
             updateConfig({ model_path: path });
             loadModel(path);

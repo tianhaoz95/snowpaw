@@ -289,6 +289,9 @@ async def main() -> None:
             # Rotate session ID
             session_id = _uuid.uuid4().hex
             orchestrator._session_id = session_id
+            # Reset and re-prime the KV cache so the next message is fast
+            backend.reset_kv_cache()
+            asyncio.create_task(orchestrator.prime_kv_cache())
             emit({"type": "system", "text": "Session reset."})
             emit({"type": "status", "phase": "idle"})
 
@@ -391,6 +394,10 @@ async def main() -> None:
                         "context_size": context_size,
                         "max_new_tokens": orchestrator._params.max_new_tokens,
                     })
+                    # Prime the KV cache with the static system+tools prefix so
+                    # the first user message only evaluates its own tokens (~28)
+                    # rather than the full ~4,500-token prefix.
+                    await orchestrator.prime_kv_cache()
                 except Exception as e:
                     emit({"type": "error", "message": f"Failed to load model: {e}"})
 

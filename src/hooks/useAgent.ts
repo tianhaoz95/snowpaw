@@ -10,6 +10,89 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// ── Diff rendering ────────────────────────────────────────────────────────────
+
+const DIFF_MAX_LINES = 40; // max lines shown per hunk before truncating
+const RED   = "\x1b[38;2;255;100;100m";
+const GREEN = "\x1b[38;2;100;220;100m";
+const DIM   = "\x1b[2m";
+const RESET = "\x1b[0m";
+
+/**
+ * Render a unified-style diff between old_string and new_string as an ANSI
+ * string ready to write to the xterm terminal.
+ */
+function formatDiff(oldStr: string, newStr: string): string {
+  const oldLines = oldStr.split("\n");
+  const newLines = newStr.split("\n");
+  const lines: string[] = [];
+
+  // Simple LCS-based diff using Myers-style patience diff approximation.
+  // For the sizes we deal with (small edits) a straightforward approach works.
+  const lcs = computeLCS(oldLines, newLines);
+
+  let oi = 0, ni = 0, li = 0;
+  while (oi < oldLines.length || ni < newLines.length) {
+    if (li < lcs.length && oi === lcs[li][0] && ni === lcs[li][1]) {
+      // Context line (unchanged)
+      lines.push(`${DIM} ${oldLines[oi]}${RESET}`);
+      oi++; ni++; li++;
+    } else if (oi < oldLines.length && (li >= lcs.length || oi < lcs[li][0])) {
+      lines.push(`${RED}-${oldLines[oi]}${RESET}`);
+      oi++;
+    } else {
+      lines.push(`${GREEN}+${newLines[ni]}${RESET}`);
+      ni++;
+    }
+  }
+
+  // Trim context: keep only lines that are adjacent to a change.
+  const changed = new Set<number>();
+  lines.forEach((l, i) => { if (l.startsWith(RED) || l.startsWith(GREEN)) changed.add(i); });
+  const CONTEXT = 2;
+  const keep = new Set<number>();
+  changed.forEach((i) => {
+    for (let d = -CONTEXT; d <= CONTEXT; d++) {
+      const idx = i + d;
+      if (idx >= 0 && idx < lines.length) keep.add(idx);
+    }
+  });
+
+  const filtered: string[] = [];
+  let lastKept = -1;
+  [...keep].sort((a, b) => a - b).forEach((i) => {
+    if (lastKept >= 0 && i > lastKept + 1) filtered.push(`${DIM}  ···${RESET}`);
+    filtered.push(lines[i]);
+    lastKept = i;
+  });
+
+  // Truncate if huge
+  const out = filtered.length > DIFF_MAX_LINES
+    ? [...filtered.slice(0, DIFF_MAX_LINES), `${DIM}  … (${filtered.length - DIFF_MAX_LINES} more lines)${RESET}`]
+    : filtered;
+
+  return out.map((l) => l.replace(/\n/g, "")).join("\r\n") + "\r\n";
+}
+
+/** Compute LCS indices: returns array of [oldIdx, newIdx] pairs. */
+function computeLCS(a: string[], b: string[]): [number, number][] {
+  // For large inputs fall back to no-context diff to avoid O(n²) hang.
+  if (a.length * b.length > 10_000) return [];
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+  const result: [number, number][] = [];
+  let i = m, j = n;
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) { result.unshift([i - 1, j - 1]); i--; j--; }
+    else if (dp[i - 1][j] >= dp[i][j - 1]) i--;
+    else j--;
+  }
+  return result;
+}
+
 // ── Tool display formatting ────────────────────────────────────────────────────
 
 // ANSI color codes per tool category
@@ -247,6 +330,17 @@ export function useAgent(onConfigUpdate?: (patch: Partial<import("./useConfig").
         const label = msg.agent_label ? `\x1b[2m[${msg.agent_label}]\x1b[0m ` : "";
         const { color, summary } = formatToolStart(tool, input);
         write(`\r\n${label}${color}┌ ${tool}\x1b[0m \x1b[2m${summary}\x1b[0m\r\n`);
+        // Render inline diff for Edit and MultiEdit
+        if (tool === "Edit") {
+          const oldStr = String(input.old_string ?? "");
+          const newStr = String(input.new_string ?? "");
+          if (oldStr || newStr) write(formatDiff(oldStr, newStr));
+        } else if (tool === "MultiEdit") {
+          const edits = (input.edits as Array<{ old_string: string; new_string: string }>) ?? [];
+          for (const e of edits) {
+            if (e.old_string || e.new_string) write(formatDiff(e.old_string ?? "", e.new_string ?? ""));
+          }
+        }
       } else if (type === "tool_end") {
         const tool = msg.tool as string;
         const isError = msg.is_error as boolean;

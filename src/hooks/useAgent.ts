@@ -431,15 +431,15 @@ export function useAgent(onConfigUpdate?: (patch: Partial<import("./useConfig").
         write(`\r\n\x1b[31mAgent process exited (code ${msg.code}).\x1b[0m\r\n`);
         setAgentPhase("idle");
       } else if (type === "shell_output") {
-        // Direct shell command output — stream as-is, converting \n to \r\n
-        const text = (msg.text as string ?? "").replace(/\n/g, "\r\n");
-        write(text);
+        // Sidecar strips trailing \n; add \r\n so xterm resets cursor to col 0.
+        const text = (msg.text as string ?? "").replace(/\r/g, "");
+        write(text + "\r\n");
       } else if (type === "shell_done") {
         const code = msg.exit_code as number;
         if (code !== 0) {
-          write(`\r\n\x1b[31m[exit ${code}]\x1b[0m\r\n`);
+          write(`\x1b[31m[exit ${code}]\x1b[0m\r\n`);
         }
-        write("\r\n\x1b[32m❯\x1b[0m ");
+        write("\x1b[32m❯\x1b[0m ");
       } else if (type === "download_progress") {
         setDownloadProgress({
           modelId: msg.model_id as string,

@@ -113,7 +113,8 @@ async def _run_shell(command: str, cwd: str) -> None:
         )
         assert proc.stdout is not None
         async for line in proc.stdout:
-            emit({"type": "shell_output", "text": line.decode(errors="replace")})
+            # Strip trailing newline — the frontend adds \r\n for xterm.
+            emit({"type": "shell_output", "text": line.decode(errors="replace").rstrip("\n")})
         exit_code = await proc.wait()
         emit({"type": "shell_done", "exit_code": exit_code})
     except Exception as e:

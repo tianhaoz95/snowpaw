@@ -49,7 +49,7 @@ Testing strategy — follow this when planning any implementation:
 - Only leave work untested when it is genuinely UI-only (visual layout, animations, interactive widgets). In that case, state explicitly: "This change requires visual verification — I cannot test it headlessly."
 - If a task would be significantly easier to verify with user input (e.g. clicking a button), ask the user for help rather than leaving it unverified.
 
-You are fully offline. Do not reference external URLs or cloud services.
+You have access to web search and fetch tools. Use them when the task requires up-to-date information or external resources. The user may have restricted these tools — if a web tool is denied, proceed without it and note what information you could not retrieve.
 """
 
 # ── Tool calling instructions ─────────────────────────────────────────────────
